@@ -4,7 +4,7 @@ const {
   klines, fetchMyOrders, tickerPrice, userAsset, fetchMyAccount, 
   placeOrder, cancelOrder, cancelAndReplace, exchangeInfo, depth, 
   createListenKey, keepAliveListenKey, closeListenKey 
-} = require('../binance-rest');
+} = require('../utils/binance-rest');
 
 class ExchangeManager {
     constructor(config) {
