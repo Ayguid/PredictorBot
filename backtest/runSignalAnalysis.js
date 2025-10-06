@@ -1,5 +1,7 @@
-const BinancePredictiveBot = require('../predictor'); // Adjust path as needed
-const SignalLogger = require('./SignalLogger');
+import BinancePredictiveBot from '../BinancePredictiveBot.js';
+import SignalLogger from './SignalLogger.js';
+import { existsSync } from 'fs';
+import path from 'path';
 
 async function runSignalAnalysis() {
     const bot = new BinancePredictiveBot();
@@ -7,27 +9,31 @@ async function runSignalAnalysis() {
     try {
         console.log('📊 Starting Signal Analysis...');
         
-        // Initialize the bot (this will set up all analyzers and config)
+        // Initialize the bot
         await bot.bootManager.executeBootSequence({
-            startAnalysis: false, // Don't start live analysis
+            startAnalysis: false,
             isRestart: false
         });
 
-        // Create signal logger
         const signalLogger = new SignalLogger(bot);
 
-        // Update this path to your actual CSV file
-        const csvFilePath = './data/FETUSDT-1h-2025-08.csv'; // CHANGE THIS TO YOUR ACTUAL PATH
+        // FIXED: Use proper path resolution
+        const csvFilePath = path.join(process.cwd(), 'backtest/data', 'FETUSDT-1h-2025-08.csv');
         
-        console.log(`🔍 Analyzing signals from: ${csvFilePath}`);
+        console.log(`🔍 Looking for CSV file at: ${csvFilePath}`);
+        
+        // Check if file exists first
+        if (!existsSync(csvFilePath)) {
+            throw new Error(`CSV file not found: ${csvFilePath}\nPlease make sure the file exists in the data/ folder`);
+        }
+
+        console.log('✅ CSV file found, starting analysis...');
         
         const signals = await signalLogger.logSignalsFromCSV({
             symbol: 'FETUSDT',
             csvFilePath: csvFilePath,
-            analysisInterval: 1, // Analyze EVERY candle
-            minSignalScore: 7, // Lower threshold temporarily
-            //startDate: '2024-01-01', // Optional
-            //endDate: '2024-06-01'    // Optional
+            analysisInterval: 1,
+            minSignalScore: 7,
         });
 
         console.log(`\n🎉 Analysis complete! Found ${signals.length} signals total`);
@@ -42,15 +48,13 @@ async function runSignalAnalysis() {
     }
 }
 
-// Run if this file is executed directly
-if (require.main === module) {
-    runSignalAnalysis().then(signals => {
-        console.log(`📈 Total signals found: ${signals.length}`);
-        process.exit(0);
-    }).catch(error => {
-        console.error('💥 Failed:', error);
-        process.exit(1);
-    });
-}
+console.log('🚀 Starting signal analysis script...');
+runSignalAnalysis().then(signals => {
+    console.log(`📈 Total signals found: ${signals.length}`);
+    process.exit(0);
+}).catch(error => {
+    console.error('💥 Failed:', error);
+    process.exit(1);
+});
 
-module.exports = runSignalAnalysis;
+export default runSignalAnalysis;

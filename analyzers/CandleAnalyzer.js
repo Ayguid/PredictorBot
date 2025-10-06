@@ -1,4 +1,4 @@
-const TechnicalIndicators = require('technicalindicators');
+import TechnicalIndicators from 'technicalindicators';
 
 class CandleAnalyzer {
     constructor(timeframe = '1h', riskManagementConfig = null) {
@@ -357,4 +357,4 @@ class CandleAnalyzer {
     }
 }
 
-module.exports = CandleAnalyzer;
+export default CandleAnalyzer;

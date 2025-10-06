@@ -117,4 +117,4 @@ class LogFormatter {
     }
 }
 
-module.exports = LogFormatter;
+export default LogFormatter;

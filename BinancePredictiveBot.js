@@ -1,11 +1,13 @@
-require('dotenv').config();
-const CandleAnalyzer = require('./analyzers/CandleAnalyzer');
-const OrderBookAnalyzer = require('./analyzers/OrderBookAnalyzer');
-const TelegramBotHandler = require('./handlers/TelegramBotHandler');
-const CommandHandler = require('./handlers/CommandHandler');
-const BootManager = require('./managers/BootManager');
-const LogFormatter = require('./LogFormatter');
-const { wait } = require('./utils/helpers');
+import 'dotenv/config';
+import CandleAnalyzer from './analyzers/CandleAnalyzer.js';
+import OrderBookAnalyzer from './analyzers/OrderBookAnalyzer.js';
+import TelegramBotHandler from './handlers/TelegramBotHandler.js';
+import CommandHandler from './handlers/CommandHandler.js';
+import BootManager from './managers/BootManager.js';
+import LogFormatter from './LogFormatter.js';
+import { wait } from './utils/helpers.js';
+import ExchangeManager from './managers/ExchangeManager.js';
+import SignalLogger from './backtest/SignalLogger.js';
 
 class BinancePredictiveBot {
     constructor() {
@@ -13,7 +15,7 @@ class BinancePredictiveBot {
         this.timeframe = process.env.TIMEFRAME || '1h';
         this.config = this.buildConfig();
         this.logFormatter = new LogFormatter();
-        this.exchangeManager = new (require('./managers/ExchangeManager'));
+        this.exchangeManager = new ExchangeManager();
         this.analyzers = {
             candle: new CandleAnalyzer(this.timeframe, this.config.riskManagement),
             orderBook: new OrderBookAnalyzer()
@@ -36,9 +38,8 @@ class BinancePredictiveBot {
         this.startTime = Date.now();
         this.bootManager = new BootManager(this);
         //
-        this.signalLogger = new (require('./backtest/SignalLogger'))(this);
+        this.signalLogger = new SignalLogger(this);
     }
-
 
     buildPairSpecificConfigs() {
         return {
@@ -808,7 +809,7 @@ class BinancePredictiveBot {
         await this.exchangeManager.closeAllConnections();
     }
 
-        async analyzeSignalsFromCSV(csvFilePath, symbol = 'BTCUSDT', options = {}) {
+    async analyzeSignalsFromCSV(csvFilePath, symbol = 'BTCUSDT', options = {}) {
         if (this.isRunning) {
             throw new Error('Cannot analyze signals while live trading is active');
         }
@@ -879,11 +880,4 @@ async function main() {
     }
 }
 
-//main();
-// Only run main() if this file is executed directly
-if (require.main === module) {
-    main().catch(console.error);
-}
-
-// ✅ CRITICAL: Export the class so other files can use it
-module.exports = BinancePredictiveBot;
+export default BinancePredictiveBot;

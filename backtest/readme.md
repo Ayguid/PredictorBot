@@ -5,8 +5,8 @@ npm install csv-parser
 node backtest/runSignalAnalysis.js
 
 # Quick analysis with specific CSV file
-node backtest/quickSignalLogger.js ./path/to/your/btc_1h.csv BTCUSDT
+node backtest/quickTest.js ./path/to/your/btc_1h.csv BTCUSDT
 
 # Or use in your code
-const quickSignalLogger = require('./backtest/quickSignalLogger');
-const result = await quickSignalLogger('./data/btc_1h.csv', 'BTCUSDT');
+const quickTest = require('./backtest/quickTest');
+const result = await quickTest('./data/btc_1h.csv', 'BTCUSDT');

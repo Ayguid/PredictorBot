@@ -1,6 +1,6 @@
-const axios = require('axios');
-const crypto = require('crypto');
-const qs = require('qs');
+import axios from 'axios';
+import crypto from 'crypto';
+import qs from 'qs';
 
 const TESTNET = process.env.TESTNET === 'true';
 const BASE_URL = TESTNET ? 'https://testnet.binance.vision' : 'https://api.binance.com';
@@ -79,30 +79,32 @@ const privateRequest = (method, endpoint, params = {}) => {
 };
 
 // API Methods
-const serverTime = () => publicRequest('GET', '/api/v3/time');
-const avgPrice = (pair) => publicRequest('GET', '/api/v3/avgPrice', { symbol: pair });
-const tickerPrice = (pair) => publicRequest('GET', '/api/v3/ticker/price', pair ? { symbol: pair } : {});
-const exchangeInfo = (params) => publicRequest('GET', '/api/v3/exchangeInfo', params);
-const depth = (pair) => publicRequest('GET', '/api/v3/depth', { symbol: pair, limit: 30 });
-const klines = (pair, interval) => publicRequest('GET', '/api/v3/klines', { symbol: pair, interval, limit: 300 });
+export const serverTime = () => publicRequest('GET', '/api/v3/time');
+export const avgPrice = (pair) => publicRequest('GET', '/api/v3/avgPrice', { symbol: pair });
+export const tickerPrice = (pair) => publicRequest('GET', '/api/v3/ticker/price', pair ? { symbol: pair } : {});
+export const exchangeInfo = (params) => publicRequest('GET', '/api/v3/exchangeInfo', params);
+export const depth = (pair) => publicRequest('GET', '/api/v3/depth', { symbol: pair, limit: 30 });
+export const klines = (pair, interval) => publicRequest('GET', '/api/v3/klines', { symbol: pair, interval, limit: 300 });
 
 // Private API Methods
-const fetchMyAccount = () => privateRequest('GET', '/api/v3/account');
-const fetchMyOrders = (pair) => privateRequest('GET', '/api/v3/allOrders', { symbol: pair, limit: 30 });
-const fetchMyTrades = (pair) => privateRequest('GET', '/api/v3/myTrades', { symbol: pair });
-const getOrder = (pair, id) => privateRequest('GET', '/api/v3/order', { symbol: pair, orderId: id });
-const placeOrder = (pair, side, type, params) => privateRequest('POST', '/api/v3/order', { symbol: pair, side, type, ...params });
-const cancelOrder = (pair, id) => privateRequest('DELETE', '/api/v3/order', { symbol: pair, orderId: id });
-const cancelAndReplace = (pair, side, type, params) => privateRequest('POST', '/api/v3/order/cancelReplace', { symbol: pair, side, type, cancelReplaceMode: 'ALLOW_FAILURE', ...params });
-const assetDetail = (pair) => privateRequest('GET', '/sapi/v1/asset/assetDetail', { asset: pair });
-const userAsset = (pair) => privateRequest('POST', '/sapi/v3/asset/getUserAsset', { asset: pair });
-// User Data Stream Methods
-const createListenKey = () => publicRequest('POST', '/api/v3/userDataStream', {}, true);
-const keepAliveListenKey = (listenKey) => publicRequest('PUT', '/api/v3/userDataStream', { listenKey }, true);
-const closeListenKey = (listenKey) => publicRequest('DELETE', '/api/v3/userDataStream', { listenKey }, true);
+export const fetchMyAccount = () => privateRequest('GET', '/api/v3/account');
+export const fetchMyOrders = (pair) => privateRequest('GET', '/api/v3/allOrders', { symbol: pair, limit: 30 });
+export const fetchMyTrades = (pair) => privateRequest('GET', '/api/v3/myTrades', { symbol: pair });
+export const getOrder = (pair, id) => privateRequest('GET', '/api/v3/order', { symbol: pair, orderId: id });
+export const placeOrder = (pair, side, type, params) => privateRequest('POST', '/api/v3/order', { symbol: pair, side, type, ...params });
+export const cancelOrder = (pair, id) => privateRequest('DELETE', '/api/v3/order', { symbol: pair, orderId: id });
+export const cancelAndReplace = (pair, side, type, params) => privateRequest('POST', '/api/v3/order/cancelReplace', { symbol: pair, side, type, cancelReplaceMode: 'ALLOW_FAILURE', ...params });
+export const assetDetail = (pair) => privateRequest('GET', '/sapi/v1/asset/assetDetail', { asset: pair });
+export const userAsset = (pair) => privateRequest('POST', '/sapi/v3/asset/getUserAsset', { asset: pair });
 
-module.exports = {
-  serverTime, fetchMyAccount, avgPrice, tickerPrice, fetchMyOrders, fetchMyTrades,
-  placeOrder, getOrder, cancelOrder, cancelAndReplace, assetDetail, userAsset, 
-  klines, exchangeInfo, depth, createListenKey, keepAliveListenKey, closeListenKey
-};
+// User Data Stream Methods
+export const createListenKey = () => publicRequest('POST', '/api/v3/userDataStream', {}, true);
+export const keepAliveListenKey = (listenKey) => publicRequest('PUT', '/api/v3/userDataStream', { listenKey }, true);
+export const closeListenKey = (listenKey) => publicRequest('DELETE', '/api/v3/userDataStream', { listenKey }, true);
+
+// You can also export as default if preferred:
+// export default {
+//   serverTime, fetchMyAccount, avgPrice, tickerPrice, fetchMyOrders, fetchMyTrades,
+//   placeOrder, getOrder, cancelOrder, cancelAndReplace, assetDetail, userAsset, 
+//   klines, exchangeInfo, depth, createListenKey, keepAliveListenKey, closeListenKey
+// };

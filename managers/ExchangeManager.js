@@ -1,10 +1,10 @@
-const RateLimitedQueue = require('./../classes/RateLimitedQueue');
-const WebSocket = require('ws');
-const { 
+import RateLimitedQueue from './../classes/RateLimitedQueue.js';
+import WebSocket  from 'ws';
+import { 
   klines, fetchMyOrders, tickerPrice, userAsset, fetchMyAccount, 
   placeOrder, cancelOrder, cancelAndReplace, exchangeInfo, depth, 
   createListenKey, keepAliveListenKey, closeListenKey 
-} = require('../utils/binance-rest');
+}from '../utils/binance-rest.js';
 
 class ExchangeManager {
     constructor(config) {
@@ -396,4 +396,4 @@ class ExchangeManager {
     }
 }
 
-module.exports = ExchangeManager;
+export default ExchangeManager;

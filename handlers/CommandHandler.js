@@ -1,5 +1,5 @@
 // handlers/CommandHandler.js
-const { wait } = require('../utils/helpers');
+import { wait } from '../utils/helpers.js';
 
 class CommandHandler {
     constructor(bot) {
@@ -105,4 +105,4 @@ class CommandHandler {
     }
 }
 
-module.exports = CommandHandler;
+export default CommandHandler;

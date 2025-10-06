@@ -1,4 +1,4 @@
-const BinancePredictiveBot = require('../predictor');
+import BinancePredictiveBot from '../BinancePredictiveBot.js';
 
 async function quickTest() {
     // Test that the class can be imported and instantiated
@@ -16,8 +16,9 @@ async function quickTest() {
     console.log('✅ Test completed successfully!');
 }
 
-if (require.main === module) {
-    quickTest().catch(console.error);
-}
-
-module.exports = quickTest;
+// SIMPLE FIX: Just run the function directly
+console.log('🚀 Starting quick test...');
+quickTest().catch(error => {
+    console.error('❌ Test failed:', error);
+    process.exit(1);
+});

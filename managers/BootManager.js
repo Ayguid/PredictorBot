@@ -1,4 +1,4 @@
-const { wait } = require('../utils/helpers');
+import { wait } from '../utils/helpers.js';
 
 class BootManager {
     constructor(bot) {
@@ -87,4 +87,4 @@ class BootManager {
     }
 }
 
-module.exports = BootManager;
+export default BootManager;

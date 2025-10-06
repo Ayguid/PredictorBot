@@ -48,5 +48,4 @@ class RateLimitedQueue {
     }
 }
 
-
-module.exports = RateLimitedQueue;
+export default RateLimitedQueue;

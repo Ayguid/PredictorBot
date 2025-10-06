@@ -1,4 +1,4 @@
-const TelegramBot = require('node-telegram-bot-api');
+import TelegramBot from 'node-telegram-bot-api';
 
 class TelegramBotHandler {
     constructor(config, handleCommandCallback) {
@@ -110,4 +110,4 @@ ${action} SIGNAL
     }
 }
 
-module.exports = TelegramBotHandler;
+export default TelegramBotHandler;

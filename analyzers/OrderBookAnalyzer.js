@@ -431,4 +431,4 @@ class OrderBookAnalyzer {
     }
 }
 
-module.exports = OrderBookAnalyzer;
+export default OrderBookAnalyzer;
