@@ -2,7 +2,7 @@
 npm install csv-parser
 
 # Run comprehensive signal analysis
-node backtest/runSignalLogger.js
+node backtest/runSignalAnalysis.js
 
 # Quick analysis with specific CSV file
 node backtest/quickSignalLogger.js ./path/to/your/btc_1h.csv BTCUSDT
