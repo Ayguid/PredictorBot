@@ -1,6 +1,6 @@
 class OrderBookAnalyzer {
     
-    constructor() {
+    constructor(config) {
         this.config = {
             depthLevels: 100, // ✅ INCREASED: Can analyze more levels now
             volumeThreshold: 0.5, // ✅ ADJUSTED: More conservative with full depth
@@ -12,15 +12,12 @@ class OrderBookAnalyzer {
             minSamplesRequired: 2,
             stabilityThreshold: 0.3
         };
+        this.DEBUG = process.env.DEBUG === 'true';
 
         this.orderBookBuffer = new Map();
-        this.DEBUG = process.env.DEBUG === 'true';
-        this.pairConfigs = null;
+        this.pairConfigs = config.tradingPairs;
     }
 
-    setPairConfigs(pairConfigs) {
-        this.pairConfigs = pairConfigs;
-    }
 
     // ✅ ADD: Method to check if we have good depth data
     hasGoodDepth(metrics, symbol) {

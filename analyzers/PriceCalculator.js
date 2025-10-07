@@ -1,7 +1,7 @@
 class PriceCalculator {
-    constructor(config, pairConfigs) {
+    constructor(config) {
         this.config = config;
-        this.pairConfigs = pairConfigs;
+        this.pairConfigs = config.tradingPairs;
     }
 
     calculateSuggestedPrices(orderBook, candles, signal, candleAnalysis, symbol) {

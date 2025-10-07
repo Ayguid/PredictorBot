@@ -2,9 +2,9 @@ import TechnicalIndicators from 'technicalindicators';
 
 class CandleAnalyzer {
     
-    constructor(timeframe = '1h', riskManagementConfig = null) {
-        this.timeframe = timeframe;
-        this.config = this.buildConfig(riskManagementConfig);
+    constructor(config) {
+        this.timeframe = config.timeframe;
+        this.config = this.buildConfig(config.riskManagement);
         this.DEBUG = process.env.DEBUG === 'true'; // Enable debug logs via environment variable
 
         this.CANDLE_INDEX = {
