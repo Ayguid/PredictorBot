@@ -1,6 +1,7 @@
 import TechnicalIndicators from 'technicalindicators';
 
 class CandleAnalyzer {
+    
     constructor(timeframe = '1h', riskManagementConfig = null) {
         this.timeframe = timeframe;
         this.config = this.buildConfig(riskManagementConfig);

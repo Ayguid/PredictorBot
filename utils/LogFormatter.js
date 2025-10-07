@@ -84,24 +84,35 @@ class LogFormatter {
             : this.color.red(`$ ${suggestedPrices.entry.toFixed(symbol === 'BTCUSDT' ? 2 : this.getPrecisionDigits(currentPrice))}`);
         console.log(`  Entry: ${entryPriceDisplay}`);
 
-        // Display optimal price for long signals
-        if (signals.compositeSignal === 'long') {
-            this._logOptimalPrice(symbol, currentPrice, suggestedPrices);
-        }
+        // ✅ UPDATED: Display optimal entry for both long and short signals
+        this._logOptimalEntry(symbol, currentPrice, signals, suggestedPrices);
 
         this._logRiskReward(symbol, currentPrice, suggestedPrices);
     }
 
-    _logOptimalPrice(symbol, currentPrice, suggestedPrices) {
-        if (suggestedPrices.optimalBuy === null) {
-            console.log(`  Optimal: ${this.color.yellow('N/A (no valid level)')}`);
+    _logOptimalEntry(symbol, currentPrice, signals, suggestedPrices) {
+        if (suggestedPrices.optimalEntry === null) {
+            console.log(`  ⭐ Optimal Entry: ${this.color.yellow('N/A (no valid level)')}`);
         } else {
-            const discount = ((currentPrice - suggestedPrices.optimalBuy) / currentPrice * 100).toFixed(2);
-            if (Math.abs(discount) > 0.1 && suggestedPrices.optimalBuy < currentPrice) {
-                const optimalDisplay = this.color.blue(`$ ${suggestedPrices.optimalBuy.toFixed(symbol === 'BTCUSDT' ? 2 : this.getPrecisionDigits(currentPrice))}`);
-                console.log(`  Optimal: ${optimalDisplay} (${discount}% below current)`);
-            } else {
-                console.log(`  Optimal: ${this.color.yellow('N/A (too close to current)')}`);
+            const precision = symbol === 'BTCUSDT' ? 2 : this.getPrecisionDigits(currentPrice);
+            const optimalDisplay = this.color.blue(`$ ${suggestedPrices.optimalEntry.toFixed(precision)}`);
+            
+            if (signals.compositeSignal === 'long') {
+                // For long signals: optimal entry is below current price
+                const discount = ((currentPrice - suggestedPrices.optimalEntry) / currentPrice * 100).toFixed(2);
+                if (Math.abs(discount) > 0.1 && suggestedPrices.optimalEntry < currentPrice) {
+                    console.log(`  ⭐ Optimal Entry: ${optimalDisplay} (${discount}% below current)`);
+                } else {
+                    console.log(`  ⭐ Optimal Entry: ${this.color.yellow('N/A (too close to current)')}`);
+                }
+            } else if (signals.compositeSignal === 'short') {
+                // For short signals: optimal entry is above current price
+                const premium = ((suggestedPrices.optimalEntry - currentPrice) / currentPrice * 100).toFixed(2);
+                if (Math.abs(premium) > 0.1 && suggestedPrices.optimalEntry > currentPrice) {
+                    console.log(`  ⭐ Optimal Entry: ${optimalDisplay} (${premium}% above current)`);
+                } else {
+                    console.log(`  ⭐ Optimal Entry: ${this.color.yellow('N/A (too close to current)')}`);
+                }
             }
         }
     }

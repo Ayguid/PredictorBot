@@ -425,3 +425,223 @@ calculateSignalScore(candleSignals, obSignals, candles, symbol) {
     };
 }
 
+
+//stricterrr-try out
+calculateSignalScore(candleSignals, obSignals, candles, symbol) {
+    let longScore = 0;
+    let shortScore = 0;
+
+    const isUptrend = candleSignals.emaFast > candleSignals.emaMedium &&
+        candleSignals.emaMedium > candleSignals.emaSlow;
+
+    const isDowntrend = candleSignals.emaFast < candleSignals.emaMedium &&
+        candleSignals.emaMedium < candleSignals.emaSlow;
+
+    const lastCandle = candles[candles.length - 1];
+    const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
+
+    // ✅ STRICTER VOLUME: Require BOTH volume spike AND above average
+    const isHighVolume = candleSignals.volumeSpike && 
+        lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier;
+
+    // ✅ VOLUME CHECK - REJECT if no volume (MANDATORY)
+    if (!isHighVolume) {
+        if (this.DEBUG) {
+            console.log(`   🚫 NO VOLUME: Rejecting all signals for ${symbol}`);
+        }
+        return { long: 0, short: 0 };
+    }
+
+    const { useBollingerBands } = this.config.riskManagement;
+
+    // ✅ MUCH STRICTER: Require STRONG candle signals to start scoring
+    const hasStrongLongBase = (candleSignals.emaBullishCross && candleSignals.buyingPressure) || 
+                             (candleSignals.emaBullishCross && candleSignals.volumeSpike) ||
+                             (candleSignals.buyingPressure && candleSignals.volumeSpike);
+
+    const hasStrongShortBase = (candleSignals.emaBearishCross && candleSignals.sellingPressure) || 
+                              (candleSignals.emaBearishCross && candleSignals.volumeSpike) ||
+                              (candleSignals.sellingPressure && candleSignals.volumeSpike);
+
+    // === LONG SIGNAL SCORING (MUCH STRICTER) ===
+    if (hasStrongLongBase) {
+        // ✅ REQUIRE trend alignment
+        if (!isUptrend) {
+            if (this.DEBUG) console.log(`   🚫 LONG: No uptrend alignment`);
+            return { long: 0, short: shortScore };
+        }
+
+        // Core trend signals (STRICTER WEIGHTS)
+        if (candleSignals.emaBullishCross) longScore += 3; // Increased weight
+        if (candleSignals.buyingPressure) longScore += 3;  // Increased weight
+        
+        // Trend bonus (only if strong)
+        if (isUptrend) longScore += 2;
+
+        // Bollinger Band signals (CONSERVATIVE)
+        if (useBollingerBands) {
+            if (candleSignals.nearLowerBand) longScore += 1;
+            // Remove bbandsSqueeze as it's too sensitive
+        }
+
+        // RSI confirmation (STRICTER)
+        if (candleSignals.rsi < 40) longScore += 2; // Only in oversold territory
+        if (candleSignals.isOverbought) longScore -= 3; // Penalize overbought
+
+        // ✅ VOLUME BONUS (mandatory but reduced weight since it's already required)
+        longScore += 1;
+
+        // Order book signals (STRICTER - REQUIRE STRONG ALIGNMENT)
+        if (obSignals.inUptrend) {
+            if (obSignals.strongBidImbalance) longScore += 2;
+            if (obSignals.supportDetected) longScore += 1;
+            if (obSignals.pricePressure === 'strong_up') longScore += 2; // Only strong pressure
+            if (obSignals.compositeSignal.includes('strong_buy')) longScore += 2;
+        } else {
+            longScore -= 5; // Heavy penalty for trend misalignment
+        }
+
+        // ✅ ADDITIONAL FILTER: Reject if RSI > 60 during long signals
+        if (candleSignals.rsi > 60) {
+            longScore -= 3;
+        }
+    }
+
+    // === SHORT SIGNAL SCORING (MUCH STRICTER) ===
+    if (hasStrongShortBase) {
+        // ✅ REQUIRE trend alignment
+        if (!isDowntrend) {
+            if (this.DEBUG) console.log(`   🚫 SHORT: No downtrend alignment`);
+            return { long: longScore, short: 0 };
+        }
+
+        // Core trend signals (STRICTER WEIGHTS)
+        if (candleSignals.emaBearishCross) shortScore += 3; // Increased weight
+        if (candleSignals.sellingPressure) shortScore += 3; // Increased weight
+        
+        // Trend bonus (only if strong)
+        if (isDowntrend) shortScore += 2;
+
+        // Bollinger Band signals (CONSERVATIVE)
+        if (useBollingerBands) {
+            if (candleSignals.nearUpperBand) shortScore += 1;
+            // Remove bbandsSqueeze as it's too sensitive
+        }
+
+        // RSI confirmation (STRICTER)
+        if (candleSignals.rsi > 60) shortScore += 2; // Only in overbought territory
+        if (!candleSignals.isOverbought) shortScore -= 3; // Penalize if not overbought
+
+        // ✅ VOLUME BONUS (mandatory but reduced weight since it's already required)
+        shortScore += 1;
+
+        // Order book signals (STRICTER - REQUIRE STRONG ALIGNMENT)
+        if (obSignals.inDowntrend) {
+            if (obSignals.strongAskImbalance) shortScore += 2;
+            if (obSignals.resistanceDetected) shortScore += 1;
+            if (obSignals.pricePressure === 'strong_down') shortScore += 2; // Only strong pressure
+            if (obSignals.compositeSignal.includes('strong_sell')) shortScore += 2;
+        } else {
+            shortScore -= 5; // Heavy penalty for trend misalignment
+        }
+
+        // ✅ ADDITIONAL FILTER: Reject if RSI < 40 during short signals
+        if (candleSignals.rsi < 40) {
+            shortScore -= 3;
+        }
+    }
+
+    // === ALIGNMENT BONUS (STRICTER - REQUIRE PERFECT ALIGNMENT) ===
+    if (isUptrend && obSignals.inUptrend && hasStrongLongBase && longScore >= 8) {
+        longScore += 3; // Only give bonus to strong signals
+    }
+    if (isDowntrend && obSignals.inDowntrend && hasStrongShortBase && shortScore >= 8) {
+        shortScore += 3; // Only give bonus to strong signals
+    }
+
+    // ✅ STRICTER MAXIMUM SCORE CAP
+    const maxLongScore = hasStrongLongBase ? 12 : 0;
+    const maxShortScore = hasStrongShortBase ? 12 : 0;
+
+    // ✅ MINIMUM THRESHOLD: Require at least 8 points to be considered
+    const finalLongScore = longScore >= 8 ? Math.min(longScore, maxLongScore) : 0;
+    const finalShortScore = shortScore >= 8 ? Math.min(shortScore, maxShortScore) : 0;
+
+    if (this.DEBUG) {
+        console.log(`   📊 STRICT SCORING BREAKDOWN:`);
+        console.log(`      Long: ${finalLongScore}/${maxLongScore} | Short: ${finalShortScore}/${maxShortScore}`);
+        console.log(`      Volume: ${isHighVolume} (MANDATORY)`);
+        console.log(`      Strong Base: Long=${hasStrongLongBase}, Short=${hasStrongShortBase}`);
+        console.log(`      Trend: Uptrend=${isUptrend}, Downtrend=${isDowntrend}`);
+    }
+
+    return {
+        long: finalLongScore,
+        short: finalShortScore
+    };
+}
+
+//  Stricter Composite Signal Determination
+determineCompositeSignal(candleSignals, obSignals, candles, symbol, signalScore) {
+    if (candleSignals.error) return 'neutral';
+
+    // Detect divergence first
+    const divergence = this.detectDivergence(candleSignals, obSignals);
+    
+    // Use scoring system
+    const score = signalScore || this.calculateSignalScore(candleSignals, obSignals, candles, symbol);
+
+    // ✅ REQUIRE PERFECT ALIGNMENT FOR BOTH SIGNALS
+    const longConditions = score.long >= this.requiredScore &&
+        !divergence.bearishDivergence &&
+        !obSignals.inDowntrend &&
+        candleSignals.rsi < 60; // Additional RSI filter
+
+    const shortConditions = score.short >= this.requiredScore &&
+        !divergence.bullishDivergence &&
+        !obSignals.inUptrend &&
+        candleSignals.rsi > 40; // Additional RSI filter
+
+    // LONG SIGNAL VALIDATION
+    if (longConditions) {
+        // Additional volume confirmation
+        const lastCandle = candles[candles.length - 1];
+        const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
+        const isStrongVolume = lastVolume > candleSignals.volumeEMA * 2.0;
+
+        if (!isStrongVolume) {
+            console.log(`🚫 REJECTED LONG for ${symbol}: Insufficient volume strength`);
+            return 'neutral';
+        }
+
+        console.log(`🎯 STRONG LONG (Score: ${score.long}/12) for ${symbol}`);
+        return 'long';
+    }
+
+    // SHORT SIGNAL VALIDATION
+    if (shortConditions) {
+        // Additional volume confirmation
+        const lastCandle = candles[candles.length - 1];
+        const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
+        const isStrongVolume = lastVolume > candleSignals.volumeEMA * 2.0;
+
+        if (!isStrongVolume) {
+            console.log(`🚫 REJECTED SHORT for ${symbol}: Insufficient volume strength`);
+            return 'neutral';
+        }
+
+        console.log(`🎯 STRONG SHORT (Score: ${score.short}/12) for ${symbol}`);
+        return 'short';
+    }
+
+    // Log why signals were rejected for debugging
+    if (this.DEBUG && (score.long > 5 || score.short > 5)) {
+        console.log(`   ℹ️ Signal rejected for ${symbol}:`);
+        console.log(`      Long: ${score.long}/12 (required: ${this.requiredScore})`);
+        console.log(`      Short: ${score.short}/12 (required: ${this.requiredScore})`);
+        console.log(`      Bearish Divergence: ${divergence.bearishDivergence}`);
+        console.log(`      Bullish Divergence: ${divergence.bullishDivergence}`);
+    }
+
+    return 'neutral';
+}

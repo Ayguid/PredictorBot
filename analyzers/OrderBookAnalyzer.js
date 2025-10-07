@@ -1,4 +1,5 @@
 class OrderBookAnalyzer {
+    
     constructor() {
         this.config = {
             depthLevels: 100, // ✅ INCREASED: Can analyze more levels now

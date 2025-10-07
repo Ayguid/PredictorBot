@@ -55,54 +55,60 @@ class TelegramBotHandler {
         }
     }
 
-    sendAlert(alertData) {
-        if (!this.config.telegramBotEnabled) return;
+sendAlert(alertData) {
+    if (!this.config.telegramBotEnabled) return;
 
-        const {
-            pair,
-            signal,
-            currentPrice,
-            entryPrice,
-            stopLoss,
-            takeProfit,
-            optimalBuy = null
-        } = alertData;
+    const {
+        pair,
+        signal,
+        currentPrice,
+        entryPrice,
+        stopLoss,
+        takeProfit,
+        optimalEntry = null  // ✅ Using optimalEntry
+    } = alertData;
 
-        if (!this.config.alertSignals.includes(signal)) return;
+    if (!this.config.alertSignals.includes(signal)) return;
 
-        const riskPct = Math.abs((entryPrice - stopLoss) / entryPrice * 100);
-        const rewardPct = Math.abs((takeProfit - entryPrice) / entryPrice * 100);
-        const rrRatio = (rewardPct / riskPct).toFixed(2);
+    const riskPct = Math.abs((entryPrice - stopLoss) / entryPrice * 100);
+    const rewardPct = Math.abs((takeProfit - entryPrice) / entryPrice * 100);
+    const rrRatio = (rewardPct / riskPct).toFixed(2);
 
-        const action = signal === 'long' ? '🟢 LONG' : '🔴 SHORT';
-        const pricePrecision = pair.includes('BTC') ? 2 : 6;
+    const action = signal === 'long' ? '🟢 LONG' : '🔴 SHORT';
+    const pricePrecision = pair.includes('BTC') ? 2 : 6;
 
-        let message = `
+    let message = `
 ${action} SIGNAL
 ──────────────
 📊 Pair: ${pair}
 💰 Current: $${currentPrice.toFixed(pricePrecision)}
 🎯 Entry: $${entryPrice.toFixed(pricePrecision)}
-        `.trim();
+    `.trim();
 
-        if (optimalBuy && optimalBuy !== entryPrice) {
-            const discount = ((currentPrice - optimalBuy) / currentPrice * 100).toFixed(2);
-            message += `\n⭐ Optimal: $${optimalBuy.toFixed(pricePrecision)} (${discount}% below current) \n`;
-        }
+    // ✅ UPDATED: Use "Optimal Entry" for both long and short
+    if (optimalEntry && optimalEntry !== entryPrice) {
+        const discountPercent = signal === 'long' 
+            ? ((currentPrice - optimalEntry) / currentPrice * 100).toFixed(2)
+            : ((optimalEntry - currentPrice) / currentPrice * 100).toFixed(2);
+        
+        const direction = signal === 'long' ? 'below' : 'above';
+        
+        message += `\n⭐ Optimal Entry: $${optimalEntry.toFixed(pricePrecision)} (${discountPercent}% ${direction} current)\n`;
+    }
 
-        message += `
+    message += `
 🛑 Stop Loss: $${stopLoss.toFixed(pricePrecision)} (${riskPct.toFixed(2)}%)
 🎯 Take Profit: $${takeProfit.toFixed(pricePrecision)} (${rewardPct.toFixed(2)}%)
 ⚖️ Risk/Reward: ${rrRatio}:1
 ⏰ Time: ${new Date().toLocaleString()}
-        `.trim();
+    `.trim();
 
-        try {
-            this.bot.sendMessage(process.env.TELEGRAM_GROUPCHAT_ID, message);
-        } catch (error) {
-            console.error(`Failed to send alert for ${pair}:`, error);
-        }
+    try {
+        this.bot.sendMessage(process.env.TELEGRAM_GROUPCHAT_ID, message);
+    } catch (error) {
+        console.error(`Failed to send alert for ${pair}:`, error);
     }
+}
 }
 
 export default TelegramBotHandler;
