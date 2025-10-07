@@ -1,14 +1,14 @@
-import RateLimitedQueue from './../classes/RateLimitedQueue.js';
-import WebSocket  from 'ws';
-import { 
-  klines, fetchMyOrders, tickerPrice, userAsset, fetchMyAccount, 
-  placeOrder, cancelOrder, cancelAndReplace, exchangeInfo, depth, 
-  createListenKey, keepAliveListenKey, closeListenKey 
-}from '../utils/binance-rest.js';
+import RateLimitedQueue from '../utils/RateLimitedQueue.js';
+import WebSocket from 'ws';
+import {
+    klines, fetchMyOrders, tickerPrice, userAsset, fetchMyAccount,
+    placeOrder, cancelOrder, cancelAndReplace, exchangeInfo, depth,
+    createListenKey, keepAliveListenKey, closeListenKey
+} from '../utils/binance-rest.js';
 
 class ExchangeManager {
-    constructor(config) {
-        this.config = config;
+    constructor() {
+        //this.config = config;
         this.queue = new RateLimitedQueue(1100, 1800, 20);
         this.exchangeInfo = {};
         this.listenKey = null;
@@ -22,6 +22,8 @@ class ExchangeManager {
         };
         this.reconnectTimeouts = new Map(); // Track reconnection timeouts
         this.isShuttingDown = false; // Track shutdown state - ONLY set to true during shutdown
+        // Track last update IDs for sequence validation
+        this.lastUpdateIds = new Map();
     }
 
     async init() {
@@ -37,7 +39,7 @@ class ExchangeManager {
             process.exit(1);
         }
     }
-    
+
     async makeQueuedReq(apiFunction, ...args) {
         return new Promise((resolve, reject) => {
             this.queue.enqueue(async (done) => {
@@ -66,12 +68,12 @@ class ExchangeManager {
         if (!this.exchangeInfo.symbols) {
             await this.fetchExchangeInfo(); // Ensure exchange info is loaded
         }
-        
+
         const symbolInfo = this.exchangeInfo.symbols.find(s => s.symbol === pair);
         if (!symbolInfo) {
             throw new Error(`Symbol info not found for ${pair}`);
         }
-        
+
         return {
             symbol: symbolInfo.symbol,
             filters: symbolInfo.filters.reduce((acc, filter) => {
@@ -143,7 +145,7 @@ class ExchangeManager {
 
             const klineWsUrl = `${this.wsBaseUrl}/ws/${pair.toLowerCase()}@kline_${timeframe}`;
             const klineWs = new WebSocket(klineWsUrl);
-            
+
             klineWs.on('open', () => {
                 if (this.isShuttingDown) {
                     klineWs.close();
@@ -164,7 +166,7 @@ class ExchangeManager {
             klineWs.on('close', async () => {
                 console.log(`Kline websocket for ${pair} disconnected`);
                 delete this.sockets[`${pair}_kline`];
-                
+
                 // 🎯 ONLY reconnect if we're NOT shutting down
                 if (!this.isShuttingDown) {
                     const timeoutId = setTimeout(() => {
@@ -197,9 +199,9 @@ class ExchangeManager {
                 return;
             }
 
-            const depthWsUrl = `${this.wsBaseUrl}/ws/${pair.toLowerCase()}@depth20@100ms`;
+            const depthWsUrl = `${this.wsBaseUrl}/ws/${pair.toLowerCase()}@depth@100ms`;
             const depthWs = new WebSocket(depthWsUrl);
-    
+
             depthWs.on('open', () => {
                 if (this.isShuttingDown) {
                     depthWs.close();
@@ -208,7 +210,7 @@ class ExchangeManager {
                 console.log(`Connected to ${pair} depth websocket`);
                 resolve();
             });
-    
+
             depthWs.on('message', (data) => {
                 if (this.isShuttingDown) return;
                 const parsedData = JSON.parse(data);
@@ -217,11 +219,11 @@ class ExchangeManager {
                     this.subscribers.depth[pair].forEach(callback => callback(parsedData));
                 }
             });
-    
+
             depthWs.on('close', async () => {
                 console.log(`Depth websocket for ${pair} disconnected`);
                 delete this.sockets[`${pair}_depth`];
-                
+
                 // 🎯 ONLY reconnect if we're NOT shutting down
                 if (!this.isShuttingDown) {
                     const timeoutId = setTimeout(() => {
@@ -235,23 +237,23 @@ class ExchangeManager {
                     console.log(`❌ Depth reconnection skipped for ${pair} - shutdown in progress`);
                 }
             });
-    
+
             depthWs.on('error', (error) => {
                 console.error(`Depth websocket error for ${pair}:`, error);
                 reject(error);
             });
-    
+
             this.sockets[`${pair}_depth`] = depthWs;
         });
     }
-    
+
     async connectUserDataStream() {
         try {
             const listenKey = await this.createUserDataStream();
-    
+
             return new Promise((resolve, reject) => {
                 const userWs = new WebSocket(`${this.wsBaseUrl}/ws/${listenKey}`);
-    
+
                 userWs.on('open', () => {
                     if (this.isShuttingDown) {
                         userWs.close();
@@ -260,7 +262,7 @@ class ExchangeManager {
                     console.log('Connected to user data stream');
                     resolve();
                 });
-    
+
                 userWs.on('message', (data) => {
                     if (this.isShuttingDown) return;
                     const parsedData = JSON.parse(data);
@@ -268,16 +270,16 @@ class ExchangeManager {
                         this.subscribers.userData.global(parsedData);
                     }
                 });
-    
+
                 userWs.on('error', (error) => {
                     console.error('User data stream error:', error);
                     reject(error);
                 });
-    
+
                 userWs.on('close', async () => {
                     console.log('User data stream disconnected');
                     await this.closeUserDataStream();
-                    
+
                     // 🎯 ONLY reconnect if we're NOT shutting down
                     if (!this.isShuttingDown) {
                         setTimeout(() => {
@@ -289,7 +291,7 @@ class ExchangeManager {
                         console.log('❌ User data stream reconnection skipped - shutdown in progress');
                     }
                 });
-    
+
                 this.sockets.userData = userWs;
             });
         } catch (error) {
@@ -297,18 +299,18 @@ class ExchangeManager {
             throw error;
         }
     }
-    
+
     async createUserDataStream() {
         try {
             const response = await this.makeQueuedReq(createListenKey);
             this.listenKey = response.listenKey;
             console.log('User Data Stream started. Listen Key:', this.listenKey);
-            
+
             this.keepAliveInterval = setInterval(
                 () => this.keepAliveUserDataStream(),
                 30 * 60 * 1000
             );
-            
+
             return this.listenKey;
         } catch (error) {
             console.error('Failed to create User Data Stream:', error);
@@ -337,12 +339,12 @@ class ExchangeManager {
         try {
             await this.makeQueuedReq(closeListenKey, this.listenKey);
             console.log('User Data Stream closed:', this.listenKey);
-            
+
             if (this.keepAliveInterval) {
                 clearInterval(this.keepAliveInterval);
                 this.keepAliveInterval = null;
             }
-            
+
             this.listenKey = null;
         } catch (error) {
             console.error('Failed to close User Data Stream:', error);
@@ -352,34 +354,34 @@ class ExchangeManager {
 
     closeAllConnections() {
         console.log('🛑 Closing all websocket connections...');
-        
+
         // 🎯 MARK AS SHUTTING DOWN - this prevents ALL reconnections
         this.isShuttingDown = true;
-        
+
         // Clear all reconnection timeouts FIRST
         this.reconnectTimeouts.forEach((timeoutId, key) => {
             clearTimeout(timeoutId);
             console.log(`🧹 Cleared reconnection timeout for ${key}`);
         });
         this.reconnectTimeouts.clear();
-        
+
         // Close all sockets
         Object.entries(this.sockets).forEach(([key, socket]) => {
             if (socket) {
                 console.log(`🔌 Closing ${key}`);
                 // Remove close listeners to prevent reconnection triggers
                 socket.removeAllListeners('close');
-                
+
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.close();
                 }
             }
         });
-        
+
         // Clear all subscribers
         this.subscribers.kline = {};
         this.subscribers.depth = {};
-        
+
         this.sockets = {};
         console.log('✅ All connections closed and reconnections disabled');
     }
@@ -393,6 +395,113 @@ class ExchangeManager {
         });
         this.reconnectTimeouts.clear();
         console.log('✅ WebSocket reconnections enabled for normal operation');
+    }
+
+    // ADD: Method to process incremental depth updates
+    processIncrementalDepthUpdate(data, currentOrderBook) {
+        // ✅ FIX: Create a DEEP COPY first
+        const orderBookCopy = this.deepCopyOrderBook(currentOrderBook);
+
+        if (!orderBookCopy) {
+            return {
+                bids: data.b.map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+                asks: data.a.map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+                lastUpdateId: data.u,
+                timestamp: Date.now()
+            };
+        }
+
+        // Process updates on the COPY
+        data.b.forEach(([price, quantity]) => {
+            const numPrice = parseFloat(price);
+            const numQty = parseFloat(quantity);
+
+            orderBookCopy.bids = orderBookCopy.bids.filter(bid => bid[0] !== numPrice);
+            if (numQty > 0) {
+                orderBookCopy.bids.push([numPrice, numQty]);
+            }
+        });
+
+        data.a.forEach(([price, quantity]) => {
+            const numPrice = parseFloat(price);
+            const numQty = parseFloat(quantity);
+
+            orderBookCopy.asks = orderBookCopy.asks.filter(ask => ask[0] !== numPrice);
+            if (numQty > 0) {
+                orderBookCopy.asks.push([numPrice, numQty]);
+            }
+        });
+
+        // Cleanup the COPY, not the original
+        this.cleanupOrderBook(orderBookCopy);
+
+        // Sort the COPY
+        orderBookCopy.bids.sort((a, b) => b[0] - a[0]);
+        orderBookCopy.asks.sort((a, b) => a[0] - b[0]);
+
+        // Update sequence info on the COPY
+        orderBookCopy.lastUpdateId = data.u;
+        orderBookCopy.timestamp = Date.now();
+
+        return orderBookCopy; // Return the modified COPY
+    }
+
+    // ✅ ADD: Deep copy method
+    deepCopyOrderBook(orderBook) {
+        if (!orderBook) return null;
+
+        return {
+            bids: orderBook.bids ? orderBook.bids.map(bid => [...bid]) : [],
+            asks: orderBook.asks ? orderBook.asks.map(ask => [...ask]) : [],
+            lastUpdateId: orderBook.lastUpdateId,
+            timestamp: orderBook.timestamp
+        };
+    }
+
+    // ✅ Also update cleanupOrderBook to be safer
+    cleanupOrderBook(orderBook) {
+        if (!orderBook || orderBook.bids.length === 0 || orderBook.asks.length === 0) return;
+
+        // Add safety checks
+        const bestBid = orderBook.bids[0]?.[0];
+        const bestAsk = orderBook.asks[0]?.[0];
+
+        if (bestBid === undefined || bestAsk === undefined) return;
+
+        const currentPrice = (bestBid + bestAsk) / 2;
+
+        // Define cleanup range
+        const cleanupRange = 0.10;
+        const minPrice = currentPrice * (1 - cleanupRange);
+        const maxPrice = currentPrice * (1 + cleanupRange);
+
+        // These operations now work on the copy, not the original
+        orderBook.bids = orderBook.bids.filter(bid => bid[0] >= minPrice);
+        orderBook.asks = orderBook.asks.filter(ask => ask[0] <= maxPrice);
+
+        const maxLevels = 500;
+        if (orderBook.bids.length > maxLevels) {
+            orderBook.bids = orderBook.bids.slice(0, maxLevels);
+        }
+        if (orderBook.asks.length > maxLevels) {
+            orderBook.asks = orderBook.asks.slice(0, maxLevels);
+        }
+    }
+
+    // ADD: Method to get initial order book snapshot
+    async getOrderBookSnapshot(symbol, limit = 1000) {
+        try {
+            const snapshot = await this.makeQueuedReq(depth, symbol, limit);
+            return {
+                bids: snapshot.bids.map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+                asks: snapshot.asks.map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+                lastUpdateId: snapshot.lastUpdateId,
+                timestamp: Date.now()
+            };
+        } catch (error) {
+            console.error(`❌ Failed to get order book snapshot for ${symbol}:`, error);
+            return null;
+        }
     }
 }
 

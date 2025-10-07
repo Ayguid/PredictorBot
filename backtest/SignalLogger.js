@@ -116,7 +116,6 @@ class SignalLogger {
         const {
             symbol = 'BTCUSDT',
             csvFilePath,
-            analysisInterval = 4,
             minSignalScore = 7,
             startDate = null,
             endDate = null
@@ -134,7 +133,7 @@ class SignalLogger {
 
         console.log(`📈 Analyzing ${filteredData.length} candles...`);
 
-        return await this.analyzeSignals(filteredData, symbol, analysisInterval, minSignalScore);
+        return await this.analyzeSignals(filteredData, symbol, minSignalScore);
     }
 
     filterDataByDate(data, startDate, endDate) {
@@ -158,7 +157,7 @@ class SignalLogger {
         return filtered;
     }
 
-    async analyzeSignals(testData, symbol, analysisInterval, minSignalScore) {
+    async analyzeSignals(testData, symbol, minSignalScore) {
         const state = {
             currentCandles: [],
             signals: []

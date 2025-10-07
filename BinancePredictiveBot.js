@@ -4,51 +4,67 @@ import OrderBookAnalyzer from './analyzers/OrderBookAnalyzer.js';
 import TelegramBotHandler from './handlers/TelegramBotHandler.js';
 import CommandHandler from './handlers/CommandHandler.js';
 import BootManager from './managers/BootManager.js';
-import LogFormatter from './LogFormatter.js';
+import LogFormatter from './utils/LogFormatter.js';
 import { wait } from './utils/helpers.js';
 import ExchangeManager from './managers/ExchangeManager.js';
 import SignalLogger from './backtest/SignalLogger.js';
 
 class BinancePredictiveBot {
-    constructor() {
-        this.DEBUG = process.env.DEBUG === 'true'; // Enable debug logs via environment variable
+    constructor(testMode = false) {
+        this.testMode = testMode;
+        this.DEBUG = process.env.DEBUG === 'true';
         this.timeframe = process.env.TIMEFRAME || '1h';
         this.config = this.buildConfig();
         this.logFormatter = new LogFormatter();
-        this.exchangeManager = new ExchangeManager();
+
+        // ALWAYS initialize BootManager (but it will handle test mode internally)
+        this.bootManager = new BootManager(this);
+
+        // CONDITIONAL: Only initialize exchange manager for live trading
+        if (!testMode) {
+            this.exchangeManager = new ExchangeManager();
+        } else {
+            this.exchangeManager = null;
+            console.log('🧪 TEST MODE: Running offline without exchange connections');
+        }
+
         this.analyzers = {
             candle: new CandleAnalyzer(this.timeframe, this.config.riskManagement),
             orderBook: new OrderBookAnalyzer()
         };
+
         this.marketData = this.initializeMarketData();
         this.isRunning = false;
-        // Command handling
         this.commandHandler = new CommandHandler(this);
-        // Pass CommandHandler's executeCommand directly
-        this.telegramBotHandler = new TelegramBotHandler(
-            this.config,
-            (command, args) => this.commandHandler.executeCommand(command, args)
-        );
-        // ADDED: Signal cooldown and pair-specific configs
-        //this.signalCooldowns = new Map();
+
+        // CONDITIONAL: Only initialize Telegram for live trading
+        if (!testMode) {
+            this.telegramBotHandler = new TelegramBotHandler(
+                this.config,
+                (command, args) => this.commandHandler.executeCommand(command, args)
+            );
+        } else {
+            this.telegramBotHandler = null;
+        }
+
+        // Signal cooldown and pair-specific configs
         this.lastSignalTimes = new Map();
         this.pairConfigs = this.buildPairSpecificConfigs();
+        this.analyzers.orderBook.setPairConfigs(this.pairConfigs);
 
-        // ADDED: Uptime tracking
         this.startTime = Date.now();
-        this.bootManager = new BootManager(this);
-        //
         this.signalLogger = new SignalLogger(this);
+        this.requiredScore = 9;
     }
 
     buildPairSpecificConfigs() {
         return {
-            'BTCUSDT': { cooldown: 10, minVolume: 1000000, volatilityMultiplier: 1.0 }, // 10 minutes
-            'ETHUSDT': { cooldown: 10, minVolume: 500000, volatilityMultiplier: 1.2 },
-            'XRPUSDT': { cooldown: 10, minVolume: 1000000, volatilityMultiplier: 1.5 },
-            'ADAUSDT': { cooldown: 10, minVolume: 500000, volatilityMultiplier: 1.5 },
-            'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8 },
-            'FETUSDT': { cooldown: 10, minVolume: 500000, volatilityMultiplier: 2.0 }
+            'BTCUSDT': { cooldown: 10, minVolume: 10, volatilityMultiplier: 1.0 },        // 10 BTC and 10min
+            'ETHUSDT': { cooldown: 10, minVolume: 25, volatilityMultiplier: 1.2 },        // 25 ETH  
+            'XRPUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5 },     // 50,000 XRP
+            'ADAUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5 },     // 50,000 ADA
+            'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8 },  // 2M DOGE
+            'FETUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 2.0 }      // 50,000 FET
         };
     }
 
@@ -74,7 +90,7 @@ class BinancePredictiveBot {
                 emaMultiplier: 1.0
             },
             '1h': {
-                analysisInterval: 1000,//60000, // 1 minute
+                analysisInterval: 2000,//60000, 1 minute but now every 2 secs to debug
                 maxCandles: 168,
                 lookbackMultiplier: 60,
                 emaMultiplier: 1.0
@@ -140,7 +156,6 @@ class BinancePredictiveBot {
             analysisInterval: timeframeConfig.analysisInterval,
             maxCandles: timeframeConfig.maxCandles,
             telegramBotEnabled: true,
-            alertCooldown: 900000, //15min
             alertSignals: ['long', 'short'],
             riskManagement: adaptiveRiskManagement,
             reconnectInterval: 5000,
@@ -171,7 +186,6 @@ class BinancePredictiveBot {
     getAdaptiveVolumeThreshold(multiplier) {
         // Higher timeframes need higher volume thresholds
         const baseThreshold = 1.5;
-
         if (multiplier <= 1) return baseThreshold; // 1m
         if (multiplier <= 5) return 1.8; // 5m
         if (multiplier <= 15) return 2.0; // 15m
@@ -183,7 +197,6 @@ class BinancePredictiveBot {
     getAdaptiveVolumeAverageThreshold(multiplier) {
         // Slightly lower thresholds for average comparison
         const baseThreshold = 1.8;
-
         if (multiplier <= 1) return baseThreshold; // 1m
         if (multiplier <= 5) return 2.0; // 5m
         if (multiplier <= 15) return 2.2; // 15m
@@ -197,9 +210,15 @@ class BinancePredictiveBot {
             this.config.tradingPairs.map(symbol => [
                 symbol, {
                     candles: [],
-                    orderBook: { bids: [], asks: [] },
+                    orderBook: {
+                        bids: [],
+                        asks: [],
+                        lastUpdateId: null, // Track sequence
+                        timestamp: Date.now()
+                    },
                     previousOrderBook: { bids: [], asks: [] },
-                    lastAnalysis: null
+                    lastAnalysis: null,
+                    needsReinitialization: false // Track if we need full snapshot
                 }
             ])
         );
@@ -207,10 +226,21 @@ class BinancePredictiveBot {
 
     async setupWebsocketSubscriptions() {
         console.log('🔌 Setting up websocket subscriptions...');
-
-        // ✅ FAST: Connect all pairs in parallel
+        // Initialize full order books FIRST
         await Promise.all(this.config.tradingPairs.map(async symbol => {
-            // Connect kline and depth for each symbol in parallel
+            console.log(`📊 Initializing order book for ${symbol}...`);
+            const snapshot = await this.exchangeManager.getOrderBookSnapshot(symbol);
+            if (snapshot) {
+                this.marketData[symbol].orderBook = snapshot;
+                console.log(`  ✅ ${symbol}: Order book initialized (${snapshot.bids.length} bids, ${snapshot.asks.length} asks)`);
+            } else {
+                console.warn(`  ⚠️ ${symbol}: Failed to initialize order book`);
+                this.marketData[symbol].needsReinitialization = true;
+            }
+        }));
+
+        // THEN connect WebSocket streams
+        await Promise.all(this.config.tradingPairs.map(async symbol => {
             await Promise.all([
                 this.exchangeManager.subscribeToKline(symbol, this.config.timeframe,
                     data => this.processKlineData(symbol, data)),
@@ -245,9 +275,7 @@ class BinancePredictiveBot {
             }
 
         }));
-
         console.log('✅ Initial candles fetched successfully');
-
     }
 
     processKlineData(symbol, data) {
@@ -272,35 +300,61 @@ class BinancePredictiveBot {
     }
 
     processDepthData(symbol, data) {
-        //console.log('prcs dep', symbol,data)
         const symbolData = this.marketData[symbol];
+        // Store previous state
         symbolData.previousOrderBook = { ...symbolData.orderBook };
-        symbolData.orderBook = {
-            bids: data.bids.map(b => [parseFloat(b[0]), parseFloat(b[1])]),
-            asks: data.asks.map(a => [parseFloat(a[0]), parseFloat(a[1])]),
-            timestamp: Date.now()
-        };
+        // Process incremental update
+        const updatedOrderBook = this.exchangeManager.processIncrementalDepthUpdate(
+            data,
+            symbolData.orderBook
+        );
+        if (updatedOrderBook) {
+            symbolData.orderBook = updatedOrderBook;
+        } else {
+            // Mark for reinitialization on sequence error
+            symbolData.needsReinitialization = true;
+            console.warn(`⚠️ ${symbol}: Order book out of sync, will reinitialize`);
+        }
     }
 
     async analyzeMarket(symbol) {
-        const { candles, orderBook, previousOrderBook } = this.marketData[symbol];
-        //console.log(12, orderBook)
+        const symbolData = this.marketData[symbol];
+
+        // SKIP: Order book reinitialization in test mode
+        if (!this.testMode && (symbolData.needsReinitialization || symbolData.orderBook.bids.length === 0)) {
+            console.log(`🔄 Reinitializing order book for ${symbol} before analysis...`);
+            const snapshot = await this.exchangeManager.getOrderBookSnapshot(symbol);
+            if (snapshot) {
+                symbolData.orderBook = snapshot;
+                symbolData.needsReinitialization = false;
+                console.log(`✅ ${symbol}: Order book reinitialized (${snapshot.bids.length} bids, ${snapshot.asks.length} asks)`);
+            } else {
+                console.warn(`❌ ${symbol}: Skipping analysis - failed to reinitialize order book`);
+                return null;
+            }
+        }
+
+        const { candles, orderBook, previousOrderBook } = symbolData;
+
         if (candles.length < this.config.riskManagement.minCandlesRequired) return null;
 
         try {
             const currentPrice = candles[candles.length - 1][4];
             const [obAnalysis, candleAnalysis] = await Promise.all([
-                this.analyzers.orderBook.analyze(orderBook, previousOrderBook, candles),
+                this.analyzers.orderBook.analyze(orderBook, previousOrderBook, candles, symbol),
                 this.analyzers.candle.getAllSignals(candles)
             ]);
-            //console.log(obAnalysis)
-            // Calculate signal score first
-            const signalScore = this.calculateSignalScore(candleAnalysis, obAnalysis.signals, candles, symbol);
 
+            if (this.DEBUG) {
+                console.log(`📊 ${symbol} Order Book Stats: ${orderBook.bids.length} bids, ${orderBook.asks.length} asks`);
+            }
+
+            const signalScore = this.calculateSignalScore(candleAnalysis, obAnalysis.signals, candles, symbol);
             const compositeSignal = this.determineCompositeSignal(candleAnalysis, obAnalysis.signals, candles, symbol, signalScore);
             const suggestedPrices = this.calculateSuggestedPrices(orderBook, candles, compositeSignal, candleAnalysis, symbol);
 
-            if (compositeSignal === 'long' || compositeSignal === 'short') {
+            // CONDITIONAL: Only send Telegram alerts in live mode
+            if (!this.testMode && (compositeSignal === 'long' || compositeSignal === 'short') && !this.isInCooldown(symbol)) {
                 this.telegramBotHandler.sendAlert({
                     pair: symbol,
                     signal: compositeSignal,
@@ -309,8 +363,19 @@ class BinancePredictiveBot {
                     stopLoss: suggestedPrices.stopLoss,
                     takeProfit: suggestedPrices.takeProfit,
                     optimalBuy: suggestedPrices.optimalBuy,
-                    signalScore: signalScore[compositeSignal] // Add score to alert
+                    signalScore: signalScore[compositeSignal]
                 });
+
+                this.updateCooldown(symbol);
+
+                if (this.DEBUG) {
+                    const cooldownMins = this.pairConfigs[symbol]?.cooldown || 120;
+                    console.log(`⏰ Cooldown activated for ${symbol}: ${cooldownMins} minutes`);
+                }
+            } else if (!this.testMode && compositeSignal !== 'neutral' && this.isInCooldown(symbol)) {
+                if (this.DEBUG) {
+                    console.log(`⏰ Signal suppressed for ${symbol} (in cooldown)`);
+                }
             }
 
             return {
@@ -321,7 +386,7 @@ class BinancePredictiveBot {
                     candle: candleAnalysis,
                     orderBook: obAnalysis.signals,
                     compositeSignal,
-                    signalScore // Include score in results
+                    signalScore
                 },
                 suggestedPrices,
                 indicators: {
@@ -341,18 +406,17 @@ class BinancePredictiveBot {
         }
     }
 
-    // UPDATED: More strict signal determination with divergence checks
+    // More strict signal determination with divergence checks
     determineCompositeSignal(candleSignals, obSignals, candles, symbol, signalScore) {
         if (candleSignals.error) return 'neutral';
 
         // Detect divergence first
         const divergence = this.detectDivergence(candleSignals, obSignals);
-
         // Use scoring system
         const score = signalScore || this.calculateSignalScore(candleSignals, obSignals, candles, symbol);
 
         // LONG SIGNAL VALIDATION
-        if (score.long >= 8) {
+        if (score.long >= this.requiredScore) {
             // CRITICAL: Reject if bearish divergence detected
             if (divergence.bearishDivergence) {
                 console.log(`🚫 REJECTED LONG for ${symbol}: Bearish divergence (OB bullish but price weak/bearish)`);
@@ -387,12 +451,11 @@ class BinancePredictiveBot {
             }
 
             console.log(`🎯 STRONG LONG (Score: ${score.long}/10) for ${symbol}`);
-            this.updateCooldown(symbol);
             return 'long';
         }
 
         // SHORT SIGNAL VALIDATION
-        if (score.short >= 8) {
+        if (score.short >= this.requiredScore) {
             // CRITICAL: Reject if bullish divergence detected
             if (divergence.bullishDivergence) {
                 console.log(`🚫 REJECTED SHORT for ${symbol}: Bullish divergence (OB bearish but price strong/bullish)`);
@@ -427,14 +490,13 @@ class BinancePredictiveBot {
             }
 
             console.log(`🎯 STRONG SHORT (Score: ${score.short}/10) for ${symbol}`);
-            this.updateCooldown(symbol);
             return 'short';
         }
 
         return 'neutral';
     }
 
-    // UPDATED: More conservative scoring that requires candle + OB alignment
+    // More conservative scoring that requires candle + OB alignment
     calculateSignalScore(candleSignals, obSignals, candles, symbol) {
         let longScore = 0;
         let shortScore = 0;
@@ -452,82 +514,92 @@ class BinancePredictiveBot {
 
         const { useBollingerBands } = this.config.riskManagement;
 
+        // REASONABLE BASE REQUIREMENT
+        const hasReasonableBase =
+            candleSignals.emaBullishCross || candleSignals.buyingPressure ||
+            candleSignals.emaBearishCross || candleSignals.sellingPressure;
+
+        if (!hasReasonableBase) {
+            if (this.DEBUG) {
+                console.log(`   🚫 NO BASE SIGNAL: Rejecting weak signals for ${symbol}`);
+            }
+            return { long: 0, short: 0 };
+        }
+
         // === LONG SIGNAL SCORING ===
-
-        // Core trend signals (HIGHEST WEIGHT - REQUIRED)
         if (candleSignals.emaBullishCross) longScore += 3;
-        if (candleSignals.buyingPressure) longScore += 3; // INCREASED from 2
-        if (isUptrend) longScore += 1;
+        if (candleSignals.buyingPressure) longScore += 2;
+        if (isUptrend) longScore += 2;
 
-        // Bollinger Band signals (MEDIUM WEIGHT)
         if (useBollingerBands) {
             if (candleSignals.nearLowerBand) longScore += 2;
             if (candleSignals.bbandsSqueeze) longScore += 1;
         }
 
-        // RSI confirmation (MEDIUM WEIGHT)
         if (!candleSignals.isOverbought) longScore += 1;
+        if (isHighVolume) longScore += 1;
         if (candleSignals.rsi > 40 && candleSignals.rsi < 60) longScore += 1;
 
-        // Volume confirmation (CRITICAL)
-        if (isHighVolume) longScore += 2; // INCREASED from 1
-
-        // Order book signals (LOW WEIGHT - only if not in downtrend)
-        if (!obSignals.inDowntrend) {
-            if (obSignals.strongBidImbalance) longScore += 1;
-            if (obSignals.supportDetected) longScore += 1;
-            if (obSignals.pricePressure === 'up' || obSignals.pricePressure === 'strong_up') longScore += 1;
-        } else {
-            // PENALTY: Reduce score if OB shows downtrend
-            longScore -= 2;
-        }
+        if (obSignals.strongBidImbalance) longScore += 1;
+        if (obSignals.supportDetected) longScore += 1;
+        if (obSignals.pricePressure === 'up' || obSignals.pricePressure === 'strong_up') longScore += 1;
 
         // === SHORT SIGNAL SCORING ===
-
-        // Core trend signals (HIGHEST WEIGHT - REQUIRED)
         if (candleSignals.emaBearishCross) shortScore += 3;
-        if (candleSignals.sellingPressure) shortScore += 3; // INCREASED from 2
-        if (isDowntrend) shortScore += 1;
+        if (candleSignals.sellingPressure) shortScore += 2;
+        if (isDowntrend) shortScore += 2;
 
-        // Bollinger Band signals (MEDIUM WEIGHT)
         if (useBollingerBands) {
             if (candleSignals.nearUpperBand) shortScore += 2;
             if (candleSignals.bbandsSqueeze) shortScore += 1;
         }
 
-        // RSI confirmation (MEDIUM WEIGHT)
         if (candleSignals.isOverbought) shortScore += 1;
+        if (isHighVolume) shortScore += 1;
         if (candleSignals.rsi > 60 && candleSignals.rsi < 80) shortScore += 1;
 
-        // Volume confirmation (CRITICAL)
-        if (isHighVolume) shortScore += 2; // INCREASED from 1
+        if (obSignals.strongAskImbalance) shortScore += 1;
+        if (obSignals.resistanceDetected) shortScore += 1;
+        if (obSignals.pricePressure === 'down' || obSignals.pricePressure === 'strong_down') shortScore += 1;
 
-        // Order book signals (LOW WEIGHT - only if not in uptrend)
-        if (!obSignals.inUptrend) {
-            if (obSignals.strongAskImbalance) shortScore += 1;
-            if (obSignals.resistanceDetected) shortScore += 1;
-            if (obSignals.pricePressure === 'down' || obSignals.pricePressure === 'strong_down') shortScore += 1;
-        } else {
-            // PENALTY: Reduce score if OB shows uptrend
-            shortScore -= 2;
+        // VOLUME AS STRONG BONUS (not mandatory)
+        if (isHighVolume) {
+            longScore += 2;
+            shortScore += 2;
+            if (this.DEBUG) {
+                console.log(`   🔊 VOLUME BONUS: +2 points for high volume`);
+            }
         }
 
-        // === ALIGNMENT BONUS (both candles AND order book agree) ===
-        if (isUptrend && obSignals.inUptrend) longScore += 2;
-        if (isDowntrend && obSignals.inDowntrend) shortScore += 2;
+        // TREND ALIGNMENT
+        if (isUptrend) longScore += 1;
+        if (isDowntrend) shortScore += 1;
+
+        // GENTLE PENALTY FOR MISALIGNMENT
+        if (obSignals.inDowntrend && longScore > 5) {
+            longScore -= 1;
+        }
+
+        if (obSignals.inUptrend && shortScore > 5) {
+            shortScore -= 1;
+        }
+
+        const finalLongScore = Math.min(longScore, 10);
+        const finalShortScore = Math.min(shortScore, 10);
 
         if (this.DEBUG) {
-            console.log(`   📊 SCORING BREAKDOWN:`);
-            console.log(`      Long: ${longScore}/10 | Short: ${shortScore}/10`);
-            console.log(`      Candle Trend: Up=${isUptrend}, Down=${isDowntrend}`);
-            console.log(`      OB Trend: Up=${obSignals.inUptrend}, Down=${obSignals.inDowntrend}`);
-            console.log(`      High Volume: ${isHighVolume}`);
+            console.log(`   📊 SCORING BREAKDOWN (MIDDLE GROUND):`);
+            console.log(`      Long: ${finalLongScore}/10 | Short: ${finalShortScore}/10`);
+            console.log(`      Volume: ${isHighVolume} (Bonus: +2)`);
         }
 
-        return { long: Math.min(longScore, 10), short: Math.min(shortScore, 10) };
+        return {
+            long: finalLongScore,
+            short: finalShortScore
+        };
     }
 
-    // ADDED: Detect divergence between order book and candle signals
+    // Detect divergence between order book and candle signals
     detectDivergence(candleSignals, obSignals) {
         // Bearish divergence: Order book bullish but price action bearish/weak
         const bearishDivergence =
@@ -572,11 +644,32 @@ class BinancePredictiveBot {
         const lastSignal = this.lastSignalTimes.get(symbol);
         if (!lastSignal) return false;
 
-        return (Date.now() - lastSignal) < (cooldown * 60 * 1000);
+        const timeSinceLastSignal = Date.now() - lastSignal;
+        const cooldownMs = cooldown * 60 * 1000;
+        const remainingMs = cooldownMs - timeSinceLastSignal;
+
+        if (remainingMs > 0 && this.DEBUG) {
+            const remainingMinutes = Math.ceil(remainingMs / (60 * 1000));
+            console.log(`⏰ ${symbol} cooldown: ${remainingMinutes}m remaining`);
+        }
+
+        return remainingMs > 0;
     }
 
     updateCooldown(symbol) {
         this.lastSignalTimes.set(symbol, Date.now());
+
+        // Optional: Clean up old entries to prevent memory leaks
+        const twentyFourHours = 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        for (let [key, value] of this.lastSignalTimes.entries()) {
+            if (now - value > twentyFourHours) {
+                this.lastSignalTimes.delete(key);
+                if (this.DEBUG) {
+                    console.log(`🧹 Cleaned up old cooldown for ${key}`);
+                }
+            }
+        }
     }
 
     calculateOptimalBuyPrice(candles, orderBook, signal) {
@@ -664,7 +757,7 @@ class BinancePredictiveBot {
         return 0.0000001;
     }
 
-    // UPDATED: Dynamic stop loss calculation with ATR
+    // Dynamic stop loss calculation with ATR
     calculateSuggestedPrices(orderBook, candles, signal, candleAnalysis, symbol) {
         const currentPrice = candles[candles.length - 1][4];
         const bestBid = orderBook.bids[0]?.[0] || currentPrice;
@@ -759,7 +852,7 @@ class BinancePredictiveBot {
         };
     }
 
-    // ADDED: ATR calculation method
+    // ATR calculation method
     calculateATR(candles, period = 14) {
         if (candles.length < period + 1) return 0;
 
@@ -806,7 +899,13 @@ class BinancePredictiveBot {
 
     async shutdown() {
         this.isRunning = false;
-        await this.exchangeManager.closeAllConnections();
+
+        // SAFE: Only close connections if exchangeManager exists
+        if (this.exchangeManager) {
+            await this.exchangeManager.closeAllConnections();
+        } else {
+            console.log('🧪 TEST MODE: No exchange connections to close');
+        }
     }
 
     async analyzeSignalsFromCSV(csvFilePath, symbol = 'BTCUSDT', options = {}) {
@@ -816,7 +915,7 @@ class BinancePredictiveBot {
 
         try {
             console.log('📊 Analyzing signals from CSV...');
-            
+
             const results = await this.signalLogger.logSignalsFromCSV({
                 symbol: symbol,
                 csvFilePath: csvFilePath,
@@ -826,7 +925,7 @@ class BinancePredictiveBot {
                 endDate: options.endDate,
                 outputFile: options.outputFile
             });
-            
+
             return results;
         } catch (error) {
             console.error('Signal analysis failed:', error);
@@ -834,50 +933,6 @@ class BinancePredictiveBot {
         }
     }
 
-}
-
-async function main() {
-    const bot = new BinancePredictiveBot();
-
-    // Enhanced signal handlers
-    process.on('SIGINT', async () => {
-        console.log('🛑 Received SIGINT, shutting down gracefully...');
-        await bot.shutdown();
-        process.exit(0);
-    });
-
-    process.on('SIGTERM', async () => {
-        console.log('🛑 Received SIGTERM, shutting down gracefully...');
-        await bot.shutdown();
-        process.exit(0);
-    });
-
-    // Handle any cleanup on exit
-    process.on('exit', async () => {
-        console.log('🔴 Process exiting, cleaning up...');
-        await bot.shutdown();
-    });
-
-    process.on('unhandledRejection', (reason, promise) => {
-        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    });
-
-    process.on('uncaughtException', async (error) => {
-        console.error('Uncaught Exception:', error);
-        await bot.shutdown();
-        process.exit(1);
-    });
-
-    try {
-        await bot.bootManager.executeBootSequence({
-            startAnalysis: true, // Start analysis after init
-            isRestart: false
-        });
-    } catch (error) {
-        console.error('Bot startup error:', error);
-        await bot.shutdown();
-        process.exit(1);
-    }
 }
 
 export default BinancePredictiveBot;

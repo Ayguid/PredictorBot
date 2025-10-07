@@ -1,6 +1,3 @@
-# Install csv-parser if not already installed
-npm install csv-parser
-
 # Run comprehensive signal analysis
 node backtest/runSignalAnalysis.js
 

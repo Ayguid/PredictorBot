@@ -109,9 +109,9 @@ class CandleAnalyzer {
         const bullishVolumeRatio = totalVolume > 0 ? bullishVolume / totalVolume : 0;
 
         // MORE STRICT conditions
-        const minBullishCandles = Math.ceil(lookback * 0.8); // 80% must be bullish
+        const minBullishCandles = Math.ceil(lookback * 0.5); //before 80% must be bullish
         const hasEnoughBullishCandles = strongBullishCount >= minBullishCandles;
-        const hasStrongVolumeSupport = bullishVolumeRatio > 0.7; // 70% volume must be bullish
+        const hasStrongVolumeSupport = bullishVolumeRatio > 0.45; //before 70% volume must be bullish
 
         // DEBUG: Buying pressure details
         if (this.DEBUG) {
@@ -151,9 +151,9 @@ class CandleAnalyzer {
         const bearishVolumeRatio = totalVolume > 0 ? bearishVolume / totalVolume : 0;
 
         // MORE STRICT conditions
-        const minBearishCandles = Math.ceil(lookback * 0.8); // 80% must be bearish
+        const minBearishCandles = Math.ceil(lookback * 0.5); // 80% must be bearish
         const hasEnoughBearishCandles = strongBearishCount >= minBearishCandles;
-        const hasStrongVolumeSupport = bearishVolumeRatio > 0.7; // 70% volume must be bearish
+        const hasStrongVolumeSupport = bearishVolumeRatio > 0.45; // 70% volume must be bearish
 
         // DEBUG: Selling pressure details
         if (this.DEBUG) {
@@ -169,7 +169,7 @@ class CandleAnalyzer {
         return fastEMA.length >= 3 && mediumEMA.length >= 3 &&
             fastEMA[fastEMA.length - 1] > mediumEMA[mediumEMA.length - 1] &&
             fastEMA[fastEMA.length - 2] <= mediumEMA[mediumEMA.length - 2] &&
-            fastEMA[fastEMA.length - 3] <= mediumEMA[mediumEMA.length - 3];
+            fastEMA[fastEMA.length - 3] <= mediumEMA[mediumEMA.length - 3]; 
     }
 
     _hasEMABearishCross(fastEMA, mediumEMA) {
@@ -190,7 +190,7 @@ class CandleAnalyzer {
 
         const spikeVsEMA = currentVolume > currentVolumeEMA * this.config.volumeSpikeMultiplier;
         const spikeVsAvg = currentVolume > averageVolume * this.config.volumeAverageMultiplier;
-        const result = spikeVsEMA && spikeVsAvg;
+        const result = spikeVsEMA || spikeVsAvg; // before spikeVsEMA && spikeVsAvg;
 
         // DEBUG: Volume spike details
         if (this.DEBUG) {
@@ -208,27 +208,23 @@ class CandleAnalyzer {
         return candles.reduce((sum, c) => sum + this._getCandleProp(c, 'volume'), 0) / candles.length;
     }
 
-    _isTrendConfirmed(candles, slowEMA) {
-        if (!candles.length || !slowEMA.length) return false;
+_isTrendConfirmed(candles, slowEMA) {
+    if (!candles.length || !slowEMA.length) return false;
+    const recentCandles = candles.slice(-5);
+    const aboveCount = recentCandles.filter(c =>
+        this._getCandleProp(c, 'close') > slowEMA[slowEMA.length - 1]
+    ).length;
+    return aboveCount >= 3; // Keep at 3/5
+}
 
-        const recentCandles = candles.slice(-5);
-        const aboveCount = recentCandles.filter(c =>
-            this._getCandleProp(c, 'close') > slowEMA[slowEMA.length - 1]
-        ).length;
-
-        return aboveCount >= 4;
-    }
-
-    _isDowntrendConfirmed(candles, slowEMA) {
-        if (!candles.length || !slowEMA.length) return false;
-
-        const recentCandles = candles.slice(-5);
-        const belowCount = recentCandles.filter(c =>
-            this._getCandleProp(c, 'close') < slowEMA[slowEMA.length - 1]
-        ).length;
-
-        return belowCount >= 4;
-    }
+_isDowntrendConfirmed(candles, slowEMA) {
+    if (!candles.length || !slowEMA.length) return false;
+    const recentCandles = candles.slice(-5);
+    const belowCount = recentCandles.filter(c =>
+        this._getCandleProp(c, 'close') < slowEMA[slowEMA.length - 1]
+    ).length;
+    return belowCount >= 3; // Change to 3/5 (was 4/5)
+}
 
     isOverbought(candles) {
         const rsi = this.calculateRSI(candles);
@@ -324,13 +320,13 @@ class CandleAnalyzer {
                 buyingPressure: buyingPressure,
                 volumeSpike: volumeSpike,
                 trendConfirmed: trendConfirmed,
-                isBullish: emaBullishCross && trendConfirmed && !isOverbought,
+                isBullish: (emaBullishCross || trendConfirmed) && !isOverbought, //emaBullishCross && trendConfirmed && !isOverbought
 
                 // Bearish signals
                 emaBearishCross: emaBearishCross,
                 sellingPressure: sellingPressure,
                 downtrendConfirmed: downtrendConfirmed,
-                isBearish: emaBearishCross && downtrendConfirmed && !isOversold,
+                isBearish: (emaBearishCross || downtrendConfirmed) && !isOversold,//emaBearishCross && downtrendConfirmed && !isOversold
 
                 // RSI conditions
                 isOverbought: isOverbought,

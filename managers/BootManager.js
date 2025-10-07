@@ -5,7 +5,7 @@ class BootManager {
         this.bot = bot;
     }
 
-    async executeBootSequence(options = {}) {
+ async executeBootSequence(options = {}) {
         const { 
             clearData = false, 
             startAnalysis = false,
@@ -14,14 +14,33 @@ class BootManager {
 
         console.log(isRestart ? '🔄 Restarting bot...' : '🚀 Starting bot...');
 
-        // 🎯 CRITICAL FIX: Reset shutdown state BEFORE starting
+        // ✅ SKIP: If in test mode, don't initialize exchange connections
+        if (this.bot.testMode) {
+            console.log('🧪 TEST MODE: Skipping exchange initialization');
+            
+            // Just initialize market data for analysis
+            if (clearData) {
+                this.bot.marketData = this.bot.initializeMarketData();
+                this.bot.lastSignalTimes.clear();
+            }
+            
+            this.logConfiguration();
+            
+            if (startAnalysis) {
+                this.bot.isRunning = true;
+                this.bot.runAnalysis().catch(console.error);
+            }
+            
+            console.log('✅ Test bot started successfully (offline mode)');
+            return;
+        }
+
+        // 🎯 CRITICAL FIX: Reset shutdown state BEFORE starting (live mode only)
         this.bot.exchangeManager.resetShutdownState();
         
         if (isRestart) {
             await this.executeShutdownSequence();
-            await wait(2000); // Wait for connections to fully close
-            
-            // 🎯 RESET SHUTDOWN STATE again after shutdown
+            await wait(2000);
             this.bot.exchangeManager.resetShutdownState();
         }
 
@@ -31,28 +50,21 @@ class BootManager {
             this.bot.lastSignalTimes.clear();
         }
 
-        // ADDED: Log configuration details
         this.logConfiguration();
 
-        // PROPER BOOT SEQUENCE:
-        // 1. First get exchange information
+        // PROPER BOOT SEQUENCE (live mode only):
         console.log('📊 Fetching exchange information...');
-        await this.bot.exchangeManager.init(); // This also resets shutdown state
+        await this.bot.exchangeManager.init();
         console.log('✅ Exchange information loaded');
 
-        // 2. Then fetch initial candles
         await this.bot.fetchInitialCandles();
-
-        // 3. Then setup websocket connections
         await this.bot.setupWebsocketSubscriptions();
 
-        // 4. Then initialize Telegram bot (only on first start)
         if (!isRestart) {
             await this.bot.telegramBotHandler.initialize();
             console.log('✅ Telegram bot initialized and polling started');
         }
 
-        // 5. Start analysis if requested
         if (startAnalysis) {
             this.bot.isRunning = true;
             this.bot.runAnalysis().catch(console.error);

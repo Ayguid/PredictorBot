@@ -4,7 +4,6 @@ class TelegramBotHandler {
     constructor(config, handleCommandCallback) {
         this.config = config;
         this.handleCommandCallback = handleCommandCallback;
-        this.lastAlertTimes = {};
         this.processedMessages = new Set();
         if (config.telegramBotEnabled) {
             this.bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
@@ -70,9 +69,6 @@ class TelegramBotHandler {
         } = alertData;
 
         if (!this.config.alertSignals.includes(signal)) return;
-        const now = Date.now();
-        const lastAlert = this.lastAlertTimes[pair] || 0;
-        if (now - lastAlert < this.config.alertCooldown) return;
 
         const riskPct = Math.abs((entryPrice - stopLoss) / entryPrice * 100);
         const rewardPct = Math.abs((takeProfit - entryPrice) / entryPrice * 100);
@@ -103,7 +99,6 @@ ${action} SIGNAL
 
         try {
             this.bot.sendMessage(process.env.TELEGRAM_GROUPCHAT_ID, message);
-            this.lastAlertTimes[pair] = now;
         } catch (error) {
             console.error(`Failed to send alert for ${pair}:`, error);
         }

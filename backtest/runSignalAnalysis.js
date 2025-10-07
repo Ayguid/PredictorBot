@@ -4,7 +4,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 
 async function runSignalAnalysis() {
-    const bot = new BinancePredictiveBot();
+    const bot = new BinancePredictiveBot(true); // testMode = true
     
     try {
         console.log('📊 Starting Signal Analysis...');
@@ -18,7 +18,7 @@ async function runSignalAnalysis() {
         const signalLogger = new SignalLogger(bot);
 
         // FIXED: Use proper path resolution
-        const csvFilePath = path.join(process.cwd(), 'backtest/data', 'FETUSDT-1h-2025-08.csv');
+        const csvFilePath = path.join(process.cwd(), 'backtest/data', 'BTCUSDT-1h-2025-08.csv');
         
         console.log(`🔍 Looking for CSV file at: ${csvFilePath}`);
         
@@ -30,10 +30,9 @@ async function runSignalAnalysis() {
         console.log('✅ CSV file found, starting analysis...');
         
         const signals = await signalLogger.logSignalsFromCSV({
-            symbol: 'FETUSDT',
+            symbol: 'BTCUSDT',
             csvFilePath: csvFilePath,
-            analysisInterval: 1,
-            minSignalScore: 7,
+            minSignalScore: 8,
         });
 
         console.log(`\n🎉 Analysis complete! Found ${signals.length} signals total`);
