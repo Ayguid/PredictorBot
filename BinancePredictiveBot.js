@@ -13,24 +13,16 @@ import PriceCalculator from './analyzers/PriceCalculator.js';
 class BinancePredictiveBot {
     constructor(testMode = false) {
         this.testMode = testMode;
-        this.initBaseProperties();
-        this.initConfig();
-        this.initComponents();
-        this.initConditionalComponents();
-        this.initCooldownAndTracking();
-    }
-
-    initBaseProperties() {
         this.DEBUG = process.env.DEBUG === 'true';
         this.timeframe = process.env.TIMEFRAME || '1h';
         this.REQUIRED_SCORE = 9;
         this.isRunning = false;
         this.startTime = Date.now();
-    }
-
-    initConfig() {
+        this.lastSignalTimes = new Map();
         this.config = this.buildConfig();
         this.marketData = this.initializeMarketData();
+        this.initComponents();
+        this.initConditionalComponents();
     }
 
     initComponents() {
@@ -66,10 +58,6 @@ class BinancePredictiveBot {
         } else {
             this.telegramBotHandler = null;
         }
-    }
-
-    initCooldownAndTracking() {
-        this.lastSignalTimes = new Map();
     }
 
     buildConfig() {
@@ -145,8 +133,10 @@ class BinancePredictiveBot {
             longEntryDiscount: 0.002,
             shortEntryPremium: 0.001,
             minCandlesRequired: 20,
-            volumeSpikeMultiplier: 1.5,
-            volumeAverageMultiplier: 1.8,
+            volumeSpikeMultiplier: 1.2,    // 80% of EMA = volume spike  
+            volumeAverageMultiplier: 1.0,  // 100% of EMA = high volume
+            //volumeSpikeMultiplier: 1.5, //try lowering // 150% of EMA = volume spike
+            //volumeAverageMultiplier: 1.8, //try lowering // 180% of EMA = high volume
             volumeLookbackPeriod: 20,
             significantBidsCount: 3,
             minOptimalDiscountPercent: 0.005,
@@ -168,16 +158,46 @@ class BinancePredictiveBot {
         };
     }
 
-    getTradingPairs() {
-        return {
-                'BTCUSDT': { cooldown: 10, minVolume: 10, volatilityMultiplier: 1.0 },
-                //'ETHUSDT': { cooldown: 10, minVolume: 25, volatilityMultiplier: 1.2 },
-                //'XRPUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5 },
-                //'ADAUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5 },
-                //'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8 },
-                //'FETUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 2.0 }
-        };
-    }
+getTradingPairs() {
+    return {
+        'BTCUSDT': { 
+            cooldown: 10, 
+            minVolume: 10, 
+            volatilityMultiplier: 1.0, 
+            volumeMultiplier: 0.3  // ✅ ADDED - 30% of EMA for BTC
+        },
+        'ETHUSDT': { 
+            cooldown: 10, 
+            minVolume: 25, 
+            volatilityMultiplier: 1.2, 
+            volumeMultiplier: 0.4  // ✅ ADDED - 40% of EMA for ETH
+        },
+        'BNBUSDT': { 
+            cooldown: 10, 
+            minVolume: 150, 
+            volatilityMultiplier: 1.1, 
+            volumeMultiplier: 0.5  // ✅ ADDED - 50% of EMA for BNB
+        },
+        'XRPUSDT': { 
+            cooldown: 10, 
+            minVolume: 50000, 
+            volatilityMultiplier: 1.5, 
+            volumeMultiplier: 0.2  // ✅ ADDED - 20% of EMA for XRP
+        },
+        'ADAUSDT': { 
+            cooldown: 10, 
+            minVolume: 50000, 
+            volatilityMultiplier: 1.5, 
+            volumeMultiplier: 0.25 // ✅ ADDED - 25% of EMA for ADA
+        },
+        'DOGEUSDT': { 
+            cooldown: 10, 
+            minVolume: 2000000, 
+            volatilityMultiplier: 1.8, 
+            volumeMultiplier: 0.15 // ✅ ADDED - 15% of EMA for DOGE
+        }
+    };
+}
 
     calculateAdaptiveRiskManagement(baseRiskManagement, timeframeConfig) {
         const multiplier = timeframeConfig.lookbackMultiplier;
@@ -192,30 +212,9 @@ class BinancePredictiveBot {
             emaMediumPeriod: Math.max(10, Math.round(baseRiskManagement.baseEmaMediumPeriod * emaMultiplier)),
             emaLongPeriod: Math.max(20, Math.round(baseRiskManagement.baseEmaLongPeriod * emaMultiplier)),
             minCandlesRequired: Math.max(20, Math.round(20 * (60 / multiplier))),
-            volumeSpikeMultiplier: this.getAdaptiveVolumeThreshold(multiplier),
-            volumeAverageMultiplier: this.getAdaptiveVolumeAverageThreshold(multiplier)
         };
     }
 
-    getAdaptiveVolumeThreshold(multiplier) {
-        const baseThreshold = 1.5;
-        if (multiplier <= 1) return baseThreshold;
-        if (multiplier <= 5) return 1.8;
-        if (multiplier <= 15) return 2.0;
-        if (multiplier <= 60) return 2.2;
-        if (multiplier <= 240) return 2.5;
-        return 3.0;
-    }
-
-    getAdaptiveVolumeAverageThreshold(multiplier) {
-        const baseThreshold = 1.8;
-        if (multiplier <= 1) return baseThreshold;
-        if (multiplier <= 5) return 2.0;
-        if (multiplier <= 15) return 2.2;
-        if (multiplier <= 60) return 2.0;
-        if (multiplier <= 240) return 2.2;
-        return 2.8;
-    }
 
     initializeMarketData() {
         return Object.fromEntries(
@@ -648,35 +647,30 @@ calculateSignalScore(candleSignals, obSignals, candles, symbol) {
 
     const lastCandle = candles[candles.length - 1];
     const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
-
-    // FIX: Use more reasonable volume check
-    const recentVolumes = candles.slice(-10).map(c => this.analyzers.candle._getCandleProp(c, 'volume'));
-    const avgRecentVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
     
-    // Check if current volume is reasonable compared to recent average
-    const volumeRatio = lastVolume / (avgRecentVolume || 1);
-    const isReasonableVolume = volumeRatio > 0.1; //0.3 At least 30% of recent average volume
-    
-    // Also accept volume spikes
-    const isHighVolume = candleSignals.volumeSpike || isReasonableVolume;
+    // ✅ MANDATORY VOLUME: Must have volume spike to proceed
+    const isHighVolume = candleSignals.volumeSpike ||
+        lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier; // try lowering this.config.riskManagement.volumeAverageMultiplier
 
+    // ✅ VOLUME CHECK - REJECT if no volume
     if (!isHighVolume) {
         if (this.DEBUG) {
-            console.log(`   🚫 LOW VOLUME: Rejecting signals for ${symbol}`);
-            console.log(`      Current: ${lastVolume.toFixed(0)}, Recent Avg: ${avgRecentVolume.toFixed(0)}`);
-            console.log(`      Ratio: ${volumeRatio.toFixed(2)} (required: >0.3)`);
+            console.log(`   🚫 NO VOLUME: Rejecting all signals for ${symbol}`);
         }
         return { long: 0, short: 0 };
     }
 
-    if (this.DEBUG) {
-        console.log(`   ✅ VOLUME OK: ${symbol} ratio=${volumeRatio.toFixed(2)}`);
-    }
-
     const { useBollingerBands } = this.config.riskManagement;
+
+    // ✅ STRICTER: Require multiple strong signals to start scoring
+    /*
     const hasStrongLongBase = candleSignals.emaBullishCross || candleSignals.buyingPressure;
     const hasStrongShortBase = candleSignals.emaBearishCross || candleSignals.sellingPressure;
-
+    */
+    const hasStrongLongBase = candleSignals.emaBullishCross || candleSignals.buyingPressure || 
+                         candleSignals.trendConfirmed || candleSignals.volumeSpike;
+    const hasStrongShortBase = candleSignals.emaBearishCross || candleSignals.sellingPressure || 
+                            candleSignals.downtrendConfirmed || candleSignals.volumeSpike;
     // === LONG SIGNAL SCORING ===
     if (hasStrongLongBase) {
         // Core trend signals (REDUCED WEIGHT)
@@ -750,7 +744,7 @@ calculateSignalScore(candleSignals, obSignals, candles, symbol) {
     if (this.DEBUG) {
         console.log(`   📊 SCORING BREAKDOWN (MANDATORY VOLUME):`);
         console.log(`      Long: ${longScore}/${maxLongScore} | Short: ${shortScore}/${maxShortScore}`);
-        console.log(`      Volume: ${isHighVolume} (Current: ${lastVolume.toFixed(0)}, Ratio: ${volumeRatio.toFixed(2)})`);
+        console.log(`      Volume: ${isHighVolume} (MANDATORY)`);
         console.log(`      Strong Base: Long=${hasStrongLongBase}, Short=${hasStrongShortBase}`);
     }
 
