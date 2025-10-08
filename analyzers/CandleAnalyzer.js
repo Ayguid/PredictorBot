@@ -200,7 +200,6 @@ class CandleAnalyzer {
                         `Avg=${averageVolume.toFixed(0)}, ` +
                         `SpikeVsEMA=${spikeVsEMA}, SpikeVsAvg=${spikeVsAvg}, Result=${result}`);
         }
-
         return result;
     }
 

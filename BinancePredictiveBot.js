@@ -133,10 +133,16 @@ class BinancePredictiveBot {
             longEntryDiscount: 0.002,
             shortEntryPremium: 0.001,
             minCandlesRequired: 20,
-            volumeSpikeMultiplier: 1.2,    // 80% of EMA = volume spike  
-            volumeAverageMultiplier: 1.0,  // 100% of EMA = high volume
-            //volumeSpikeMultiplier: 1.5, //try lowering // 150% of EMA = volume spike
-            //volumeAverageMultiplier: 1.8, //try lowering // 180% of EMA = high volume
+            //volumeSpikeMultiplier: 2,       //  
+            //volumeAverageMultiplier: 1.5,   //  
+            //volumeSpikeMultiplier: 2.5,    // Even stricter spike detection
+            //volumeAverageMultiplier: 1.8,  // Back to very high volume requirement
+            //volumeSpikeMultiplier: 1.8,    // Slightly easier spikes  
+            //volumeAverageMultiplier: 1.2,  // Much easier average volume
+            volumeSpikeMultiplier: 2.2,    // Still strict spikes
+            volumeAverageMultiplier: 1.3,  // Moderate volume requirement
+            //volumeSpikeMultiplier: 1.5,    // Focus on catching true spikes
+            //volumeAverageMultiplier: 2.0,  // Make average very hard (spikes dominate)
             volumeLookbackPeriod: 20,
             significantBidsCount: 3,
             minOptimalDiscountPercent: 0.005,
@@ -160,42 +166,12 @@ class BinancePredictiveBot {
 
 getTradingPairs() {
     return {
-        'BTCUSDT': { 
-            cooldown: 10, 
-            minVolume: 10, 
-            volatilityMultiplier: 1.0, 
-            volumeMultiplier: 0.3  // ✅ ADDED - 30% of EMA for BTC
-        },
-        'ETHUSDT': { 
-            cooldown: 10, 
-            minVolume: 25, 
-            volatilityMultiplier: 1.2, 
-            volumeMultiplier: 0.4  // ✅ ADDED - 40% of EMA for ETH
-        },
-        'BNBUSDT': { 
-            cooldown: 10, 
-            minVolume: 150, 
-            volatilityMultiplier: 1.1, 
-            volumeMultiplier: 0.5  // ✅ ADDED - 50% of EMA for BNB
-        },
-        'XRPUSDT': { 
-            cooldown: 10, 
-            minVolume: 50000, 
-            volatilityMultiplier: 1.5, 
-            volumeMultiplier: 0.2  // ✅ ADDED - 20% of EMA for XRP
-        },
-        'ADAUSDT': { 
-            cooldown: 10, 
-            minVolume: 50000, 
-            volatilityMultiplier: 1.5, 
-            volumeMultiplier: 0.25 // ✅ ADDED - 25% of EMA for ADA
-        },
-        'DOGEUSDT': { 
-            cooldown: 10, 
-            minVolume: 2000000, 
-            volatilityMultiplier: 1.8, 
-            volumeMultiplier: 0.15 // ✅ ADDED - 15% of EMA for DOGE
-        }
+        'BTCUSDT': { cooldown: 10, minVolume: 10, volatilityMultiplier: 1.0, volumeMultiplier: 0.3 },  // ✅ ADDED - 30% of EMA for BTC
+        //'ETHUSDT': { cooldown: 10, minVolume: 25, volatilityMultiplier: 1.2, volumeMultiplier: 0.4 },  // ✅ ADDED - 40% of EMA for ETH
+        //'BNBUSDT': { cooldown: 10, minVolume: 150, volatilityMultiplier: 1.1, volumeMultiplier: 0.5 },  // ✅ ADDED - 50% of EMA for BNB
+        //'XRPUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.2 },  // ✅ ADDED - 20% of EMA for XRP
+        //'ADAUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.25}, // ✅ ADDED - 25% of EMA for ADA
+        //'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8, volumeMultiplier: 0.15 } // ✅ ADDED - 15% of EMA for DOGE
     };
 }
 
@@ -243,6 +219,32 @@ getTradingPairs() {
 
         await this.connectWebSocketStreams();
         await this.waitForWebSocketData();
+
+         // ✅ VERIFY connections are actually receiving data
+    console.log('🔍 Verifying WebSocket data flow...');
+    let depthWorking = false;
+    let klineWorking = false;
+    
+    Object.keys(this.config.tradingPairs).forEach(symbol => {
+        const depthSocket = this.exchangeManager.sockets[`${symbol}_depth`];
+        const klineSocket = this.exchangeManager.sockets[`${symbol}_kline`];
+        
+        if (depthSocket && depthSocket.readyState === 1) {
+            console.log(`   ✅ ${symbol} depth: CONNECTED`);
+            depthWorking = true;
+        } else {
+            console.log(`   ❌ ${symbol} depth: NOT CONNECTED`);
+        }
+        
+        if (klineSocket && klineSocket.readyState === 1) {
+            console.log(`   ✅ ${symbol} kline: CONNECTED`);
+            klineWorking = true;
+        }
+    });
+    
+    if (!depthWorking) {
+        console.warn('⚠️ Depth WebSockets not functioning properly after restart');
+    }
         await this.synchronizeOrderBookSnapshots();
         await this.validateCandleStreaming();
     }
@@ -647,11 +649,21 @@ calculateSignalScore(candleSignals, obSignals, candles, symbol) {
 
     const lastCandle = candles[candles.length - 1];
     const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
-    
+
     // ✅ MANDATORY VOLUME: Must have volume spike to proceed
     const isHighVolume = candleSignals.volumeSpike ||
         lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier; // try lowering this.config.riskManagement.volumeAverageMultiplier
-
+        //
+        if (this.DEBUG) {
+        console.log(`🔍 VOLUME VALIDATION for ${symbol}:`);
+        console.log(`   Volume Spike: ${candleSignals.volumeSpike}`);
+        console.log(`   Last Volume: ${lastVolume}`);
+        console.log(`   Volume EMA: ${candleSignals.volumeEMA}`);
+        console.log(`   Multiplier: ${this.config.riskManagement.volumeAverageMultiplier}`);
+        console.log(`   Required: ${candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier}`);
+        console.log(`   High Volume Condition: ${lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier}`);
+        console.log(`   Final isHighVolume: ${isHighVolume}`);
+    }
     // ✅ VOLUME CHECK - REJECT if no volume
     if (!isHighVolume) {
         if (this.DEBUG) {
@@ -754,70 +766,8 @@ calculateSignalScore(candleSignals, obSignals, candles, symbol) {
     };
 }
 
-    calculateLongScore(candleSignals, obSignals, isUptrend, useBollingerBands, isHighVolume, hasStrongLongBase) {
-        if (!hasStrongLongBase) return 0;
 
-        let score = 0;
 
-        if (candleSignals.emaBullishCross) score += 2;
-        if (candleSignals.buyingPressure) score += 2;
-        if (isUptrend) score += 1;
-
-        if (useBollingerBands) {
-            if (candleSignals.nearLowerBand) score += 1;
-        }
-
-        if (!candleSignals.isOverbought) score += 1;
-        if (isHighVolume) score += 2;
-
-        if (!obSignals.inDowntrend) {
-            if (obSignals.strongBidImbalance) score += 1;
-            if (obSignals.supportDetected) score += 1;
-            if (obSignals.pricePressure === 'up' || obSignals.pricePressure === 'strong_up') score += 1;
-            if (obSignals.compositeSignal.includes('buy')) score += 1;
-        } else {
-            score -= 3;
-        }
-
-        return score;
-    }
-
-    calculateShortScore(candleSignals, obSignals, isDowntrend, useBollingerBands, isHighVolume, hasStrongShortBase) {
-        if (!hasStrongShortBase) return 0;
-
-        let score = 0;
-
-        if (candleSignals.emaBearishCross) score += 2;
-        if (candleSignals.sellingPressure) score += 2;
-        if (isDowntrend) score += 1;
-
-        if (useBollingerBands) {
-            if (candleSignals.nearUpperBand) score += 1;
-        }
-
-        if (candleSignals.isOverbought) score += 1;
-        if (isHighVolume) score += 2;
-
-        if (!obSignals.inUptrend) {
-            if (obSignals.strongAskImbalance) score += 1;
-            if (obSignals.resistanceDetected) score += 1;
-            if (obSignals.pricePressure === 'down' || obSignals.pricePressure === 'strong_down') score += 1;
-            if (obSignals.compositeSignal.includes('sell')) score += 1;
-        } else {
-            score -= 3;
-        }
-
-        return score;
-    }
-
-    calculateAlignmentBonus(isUptrend, isDowntrend, obSignals, hasStrongLongBase, hasStrongShortBase) {
-        const bonus = { long: 0, short: 0 };
-        
-        if (isUptrend && obSignals.inUptrend && hasStrongLongBase) bonus.long += 2;
-        if (isDowntrend && obSignals.inDowntrend && hasStrongShortBase) bonus.short += 2;
-        
-        return bonus;
-    }
 
     detectDivergence(candleSignals, obSignals) {
         const bearishDivergence =
