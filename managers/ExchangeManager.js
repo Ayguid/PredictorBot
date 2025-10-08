@@ -9,6 +9,8 @@ import {
 class ExchangeManager {
     constructor() {
         //this.config = config;
+        this.DEBUG_MODE = process.env.DEBUG_ORDERBOOK === 'true'; //
+
         this.queue = new RateLimitedQueue(1100, 1800, 20);
         this.exchangeInfo = {};
         this.listenKey = null;
@@ -190,62 +192,93 @@ class ExchangeManager {
         });
     }
 
-    connectDepthSocket(pair) {
-        return new Promise((resolve, reject) => {
-            // Don't connect if we're shutting down
+connectDepthSocket(pair) {
+    return new Promise((resolve, reject) => {
+        if (this.isShuttingDown) {
+            console.log(`❌ Skipping depth connection for ${pair} - shutdown in progress`);
+            resolve();
+            return;
+        }
+
+        const depthWsUrl = `${this.wsBaseUrl}/ws/${pair.toLowerCase()}@depth@100ms`;
+        const depthWs = new WebSocket(depthWsUrl);
+
+        let connectionStartTime = Date.now();
+        let messageCount = 0;
+        let lastMessageTime = Date.now();
+
+        // Monitor connection health
+        const healthCheck = setInterval(() => {
+            const timeSinceLastMessage = Date.now() - lastMessageTime;
+            if (timeSinceLastMessage > 10000) { // 10 seconds without messages
+                console.warn(`🩺 Depth WebSocket health check failed for ${pair}: No messages for ${timeSinceLastMessage}ms`);
+                depthWs.close(); // Force reconnect
+            }
+        }, 5000);
+
+        depthWs.on('open', () => {
             if (this.isShuttingDown) {
-                console.log(`❌ Skipping depth connection for ${pair} - shutdown in progress`);
-                resolve();
+                depthWs.close();
                 return;
             }
+            console.log(`✅ Connected to ${pair} depth websocket`);
+            connectionStartTime = Date.now();
+            resolve();
+        });
 
-            const depthWsUrl = `${this.wsBaseUrl}/ws/${pair.toLowerCase()}@depth@100ms`;
-            const depthWs = new WebSocket(depthWsUrl);
+        depthWs.on('message', (data) => {
+            if (this.isShuttingDown) return;
+            
+            messageCount++;
+            lastMessageTime = Date.now();
+            
+            // Log connection stats periodically
+            /*if (messageCount % 100 === 0) {
+                const uptime = Math.floor((Date.now() - connectionStartTime) / 1000);
+                console.log(`📊 ${pair} depth: ${messageCount} messages over ${uptime}s (${Math.round(messageCount/uptime)}/sec)`);
+            }*/
 
-            depthWs.on('open', () => {
-                if (this.isShuttingDown) {
-                    depthWs.close();
-                    return;
-                }
-                console.log(`Connected to ${pair} depth websocket`);
-                resolve();
-            });
-
-            depthWs.on('message', (data) => {
-                if (this.isShuttingDown) return;
+            try {
                 const parsedData = JSON.parse(data);
-                //console.log(parsedData)
                 if (this.subscribers.depth[pair]) {
                     this.subscribers.depth[pair].forEach(callback => callback(parsedData));
                 }
-            });
-
-            depthWs.on('close', async () => {
-                console.log(`Depth websocket for ${pair} disconnected`);
-                delete this.sockets[`${pair}_depth`];
-
-                // 🎯 ONLY reconnect if we're NOT shutting down
-                if (!this.isShuttingDown) {
-                    const timeoutId = setTimeout(() => {
-                        if (!this.isShuttingDown) {
-                            this.connectDepthSocket(pair);
-                        }
-                    }, 5000);
-                    this.reconnectTimeouts.set(`${pair}_depth`, timeoutId);
-                    console.log(`⏰ Scheduled depth reconnection for ${pair} in 5 seconds`);
-                } else {
-                    console.log(`❌ Depth reconnection skipped for ${pair} - shutdown in progress`);
-                }
-            });
-
-            depthWs.on('error', (error) => {
-                console.error(`Depth websocket error for ${pair}:`, error);
-                reject(error);
-            });
-
-            this.sockets[`${pair}_depth`] = depthWs;
+            } catch (error) {
+                console.error(`❌ Error parsing depth data for ${pair}:`, error);
+            }
         });
-    }
+
+        depthWs.on('close', async (code, reason) => {
+            clearInterval(healthCheck);
+            console.log(`🔌 Depth websocket for ${pair} disconnected: ${code} - ${reason}`);
+            delete this.sockets[`${pair}_depth`];
+
+            if (!this.isShuttingDown) {
+                const reconnectDelay = 2000; // 2 seconds
+                console.log(`⏰ Reconnecting depth for ${pair} in ${reconnectDelay}ms...`);
+                
+                const timeoutId = setTimeout(() => {
+                    if (!this.isShuttingDown) {
+                        this.connectDepthSocket(pair);
+                    }
+                }, reconnectDelay);
+                this.reconnectTimeouts.set(`${pair}_depth`, timeoutId);
+            }
+        });
+
+        depthWs.on('error', (error) => {
+            clearInterval(healthCheck);
+            console.error(`❌ Depth websocket error for ${pair}:`, error);
+            reject(error);
+        });
+
+        depthWs.on('ping', () => {
+            depthWs.pong(); // Respond to keepalive ping
+        });
+
+        this.sockets[`${pair}_depth`] = depthWs;
+    });
+}
 
     async connectUserDataStream() {
         try {
@@ -398,53 +431,59 @@ class ExchangeManager {
     }
 
     // ADD: Method to process incremental depth updates
-    processIncrementalDepthUpdate(data, currentOrderBook) {
-        // ✅ FIX: Create a DEEP COPY first
-        const orderBookCopy = this.deepCopyOrderBook(currentOrderBook);
+processIncrementalDepthUpdate(data, currentOrderBook) {
+    if (!currentOrderBook || !currentOrderBook.bids || !currentOrderBook.asks) {
+        return {
+            bids: data.b ? data.b.map(b => [parseFloat(b[0]), parseFloat(b[1])]) : [],
+            asks: data.a ? data.a.map(a => [parseFloat(a[0]), parseFloat(a[1])]) : [],
+            lastUpdateId: data.u,
+            timestamp: Date.now()
+        };
+    }
 
-        if (!orderBookCopy) {
-            return {
-                bids: data.b.map(b => [parseFloat(b[0]), parseFloat(b[1])]),
-                asks: data.a.map(a => [parseFloat(a[0]), parseFloat(a[1])]),
-                lastUpdateId: data.u,
-                timestamp: Date.now()
-            };
+    // ✅ RELAXED VALIDATION: Only reject if we're clearly behind
+    if (currentOrderBook.lastUpdateId) {
+        // Old update - ignore
+        if (data.u <= currentOrderBook.lastUpdateId) {
+            return currentOrderBook;
         }
 
-        // Process updates on the COPY
+        // If we're more than 100 updates behind, reinitialize
+        if (data.U > currentOrderBook.lastUpdateId + 100) {
+            console.warn(`❌ Too far behind: current=${currentOrderBook.lastUpdateId}, U=${data.U}, gap=${data.U - currentOrderBook.lastUpdateId}`);
+            return null;
+        }
+    }
+
+    // Process update (same logic as applyDepthUpdate)
+    const orderBookCopy = this.deepCopyOrderBook(currentOrderBook);
+
+    if (data.b && Array.isArray(data.b)) {
         data.b.forEach(([price, quantity]) => {
             const numPrice = parseFloat(price);
             const numQty = parseFloat(quantity);
-
             orderBookCopy.bids = orderBookCopy.bids.filter(bid => bid[0] !== numPrice);
-            if (numQty > 0) {
-                orderBookCopy.bids.push([numPrice, numQty]);
-            }
+            if (numQty > 0) orderBookCopy.bids.push([numPrice, numQty]);
         });
+    }
 
+    if (data.a && Array.isArray(data.a)) {
         data.a.forEach(([price, quantity]) => {
             const numPrice = parseFloat(price);
             const numQty = parseFloat(quantity);
-
             orderBookCopy.asks = orderBookCopy.asks.filter(ask => ask[0] !== numPrice);
-            if (numQty > 0) {
-                orderBookCopy.asks.push([numPrice, numQty]);
-            }
+            if (numQty > 0) orderBookCopy.asks.push([numPrice, numQty]);
         });
-
-        // Cleanup the COPY, not the original
-        this.cleanupOrderBook(orderBookCopy);
-
-        // Sort the COPY
-        orderBookCopy.bids.sort((a, b) => b[0] - a[0]);
-        orderBookCopy.asks.sort((a, b) => a[0] - b[0]);
-
-        // Update sequence info on the COPY
-        orderBookCopy.lastUpdateId = data.u;
-        orderBookCopy.timestamp = Date.now();
-
-        return orderBookCopy; // Return the modified COPY
     }
+
+    this.cleanupOrderBook(orderBookCopy);
+    orderBookCopy.bids.sort((a, b) => b[0] - a[0]);
+    orderBookCopy.asks.sort((a, b) => a[0] - b[0]);
+    orderBookCopy.lastUpdateId = data.u;
+    orderBookCopy.timestamp = Date.now();
+
+    return orderBookCopy;
+}
 
     // ✅ ADD: Deep copy method
     deepCopyOrderBook(orderBook) {
@@ -503,6 +542,27 @@ class ExchangeManager {
             return null;
         }
     }
+    async synchronizeOrderBook(symbol) {
+    console.log(`🔄 Synchronizing order book for ${symbol}...`);
+    
+    try {
+        // Get fresh snapshot
+        const snapshot = await this.getOrderBookSnapshot(symbol);
+        if (!snapshot) {
+            throw new Error('Failed to get order book snapshot');
+        }
+
+        // Wait a bit for WebSocket to catch up
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        console.log(`✅ ${symbol}: Order book synchronized with lastUpdateId=${snapshot.lastUpdateId}`);
+        return snapshot;
+        
+    } catch (error) {
+        console.error(`❌ Failed to synchronize order book for ${symbol}:`, error);
+        throw error;
+    }
+}
 }
 
 export default ExchangeManager;

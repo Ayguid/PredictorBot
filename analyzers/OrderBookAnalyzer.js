@@ -182,19 +182,21 @@ generateSignals(metrics, topBids, topAsks, candles, symbol, hasMeaningfulVol, ha
 
     // Only process volume changes if order book is stable and has meaningful volume
     if (metrics.volumeChanges && actualHasMeaningfulVol && isStable) {
-        const netChange = metrics.volumeChanges.netVolumeChange;
-        const totalVolume = metrics.totalBidVolume + metrics.totalAskVolume;
-
-        if (totalVolume > 0) {
-            const changeRatio = Math.abs(netChange) / totalVolume;
-            signals.volumeSpike = changeRatio > 0.2; // Increased from 0.1 to 0.2 (20%)
-            
-            if (this.DEBUG && signals.volumeSpike) {
-                console.log(`   🔊 Volume Spike Detected: ${(changeRatio * 100).toFixed(1)}% change`);
+        const volumeChangePercent = metrics.volumeChanges.volumeChangePercent;
+        
+        // FIX: Use reasonable threshold for volume spike
+        signals.volumeSpike = Math.abs(volumeChangePercent) > 100; // 100% change threshold
+        
+        if (this.DEBUG) {
+            if (signals.volumeSpike) {
+                console.log(`   🔊 Volume Spike Detected: ${volumeChangePercent.toFixed(1)}% change`);
+            } else {
+                console.log(`   📊 Normal Volume Change: ${volumeChangePercent.toFixed(1)}%`);
             }
         }
 
         // Enhanced price pressure logic
+        const netChange = metrics.volumeChanges.netVolumeChange;
         if (netChange > 0 && metrics.bidAskImbalance > 1.2) {
             signals.pricePressure = 'up';
         } else if (netChange < 0 && metrics.bidAskImbalance < 0.8) {
@@ -397,27 +399,52 @@ calculateSpread([bestBid], [bestAsk]) {
         return resistances;
     }
 
-    calculateVolumeChanges(current, previous, depth) {
-        const priceMatches = (p1, p2) => Math.abs(p1 - p2) / ((p1 + p2) / 2) < 0.001;
+calculateVolumeChanges(current, previous, depth) {
+    const priceMatches = (p1, p2) => Math.abs(p1 - p2) / ((p1 + p2) / 2) < 0.001;
 
-        const compareLevels = (currentLevels, previousLevels) => {
-            let totalChange = 0;
-            currentLevels.slice(0, depth).forEach(([currPrice, currVol]) => {
-                const prevLevel = previousLevels.find(([prevPrice]) => priceMatches(currPrice, prevPrice));
-                totalChange += currVol - (prevLevel ? prevLevel[1] : 0);
-            });
-            return totalChange;
-        };
+    const compareLevels = (currentLevels, previousLevels) => {
+        let totalChange = 0;
+        currentLevels.slice(0, depth).forEach(([currPrice, currVol]) => {
+            const prevLevel = previousLevels.find(([prevPrice]) => priceMatches(currPrice, prevPrice));
+            totalChange += currVol - (prevLevel ? prevLevel[1] : 0);
+        });
+        return totalChange;
+    };
 
-        const bidVolChange = compareLevels(current.bids, previous.bids);
-        const askVolChange = compareLevels(current.asks, previous.asks);
+    const bidVolChange = compareLevels(current.bids, previous.bids);
+    const askVolChange = compareLevels(current.asks, previous.asks);
+    const netVolumeChange = bidVolChange - askVolChange;
 
-        return {
-            bidVolumeChange: bidVolChange,
-            askVolumeChange: askVolChange,
-            netVolumeChange: bidVolChange - askVolChange
-        };
+    // FIX: Calculate total volumes for percentage change
+    const currentTotalVol = this.calculateTotalVolume(current.bids.slice(0, depth)) + 
+                           this.calculateTotalVolume(current.asks.slice(0, depth));
+    const previousTotalVol = this.calculateTotalVolume(previous.bids.slice(0, depth)) + 
+                            this.calculateTotalVolume(previous.asks.slice(0, depth));
+
+    // FIX: Calculate percentage change properly with limits
+    let volumeChangePercent = 0;
+    if (previousTotalVol > 0) {
+        volumeChangePercent = ((currentTotalVol - previousTotalVol) / previousTotalVol) * 100;
+        // Cap at reasonable levels to prevent false spikes
+        volumeChangePercent = Math.min(Math.max(volumeChangePercent, -500), 500);
     }
+
+    if (this.DEBUG) {
+        console.log(`   📊 Volume Change Analysis:`);
+        console.log(`   ├── Current Total: ${currentTotalVol.toFixed(1)}`);
+        console.log(`   ├── Previous Total: ${previousTotalVol.toFixed(1)}`);
+        console.log(`   ├── Change: ${volumeChangePercent.toFixed(1)}%`);
+        console.log(`   ├── Bid Change: ${bidVolChange.toFixed(2)}`);
+        console.log(`   └── Ask Change: ${askVolChange.toFixed(2)}`);
+    }
+
+    return {
+        bidVolumeChange: bidVolChange,
+        askVolumeChange: askVolChange,
+        netVolumeChange: netVolumeChange,
+        volumeChangePercent: volumeChangePercent
+    };
+}
 
     isUptrend(candles) {
         if (!candles || candles.length < 3) return false;

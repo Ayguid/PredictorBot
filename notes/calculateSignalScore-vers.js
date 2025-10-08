@@ -645,3 +645,137 @@ determineCompositeSignal(candleSignals, obSignals, candles, symbol, signalScore)
 
     return 'neutral';
 }
+
+// new one
+calculateSignalScore(candleSignals, obSignals, candles, symbol) {
+    let longScore = 0;
+    let shortScore = 0;
+
+    const isUptrend = candleSignals.emaFast > candleSignals.emaMedium &&
+        candleSignals.emaMedium > candleSignals.emaSlow;
+
+    const isDowntrend = candleSignals.emaFast < candleSignals.emaMedium &&
+        candleSignals.emaMedium < candleSignals.emaSlow;
+
+    const lastCandle = candles[candles.length - 1];
+    const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
+
+    // FIX: Use more reasonable volume check
+    const recentVolumes = candles.slice(-10).map(c => this.analyzers.candle._getCandleProp(c, 'volume'));
+    const avgRecentVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    
+    // Check if current volume is reasonable compared to recent average
+    const volumeRatio = lastVolume / (avgRecentVolume || 1);
+    const isReasonableVolume = volumeRatio > 0.1; // At least 10% of recent average volume
+    
+    // Also accept volume spikes
+    const isHighVolume = candleSignals.volumeSpike || isReasonableVolume;
+
+    if (!isHighVolume) {
+        if (this.DEBUG) {
+            console.log(`   🚫 LOW VOLUME: Rejecting signals for ${symbol}`);
+            console.log(`      Current: ${lastVolume.toFixed(0)}, Recent Avg: ${avgRecentVolume.toFixed(0)}`);
+            console.log(`      Ratio: ${volumeRatio.toFixed(2)} (required: >0.1)`);
+        }
+        return { long: 0, short: 0 };
+    }
+
+    if (this.DEBUG) {
+        console.log(`   ✅ VOLUME OK: ${symbol} ratio=${volumeRatio.toFixed(2)}`);
+    }
+
+    const { useBollingerBands } = this.config.riskManagement;
+
+    // FIX: More flexible base requirements
+    const hasLongPotential = candleSignals.emaBullishCross || candleSignals.buyingPressure || 
+                            candleSignals.trendConfirmed || candleSignals.volumeSpike ||
+                            !candleSignals.isBearish; // Not actively bearish
+
+    const hasShortPotential = candleSignals.emaBearishCross || candleSignals.sellingPressure || 
+                             candleSignals.downtrendConfirmed || candleSignals.volumeSpike ||
+                             !candleSignals.isBullish; // Not actively bullish
+
+    // === LONG SIGNAL SCORING ===
+    if (hasLongPotential) {
+        // Base score for having potential
+        longScore += 2;
+
+        // Candle signals (incremental)
+        if (candleSignals.emaBullishCross) longScore += 3;
+        if (candleSignals.buyingPressure) longScore += 3;
+        if (candleSignals.trendConfirmed) longScore += 2;
+        if (candleSignals.volumeSpike) longScore += 2;
+        if (isUptrend) longScore += 1;
+
+        // Bollinger Band signals
+        if (useBollingerBands) {
+            if (candleSignals.nearLowerBand) longScore += 2;
+        }
+
+        // RSI confirmation
+        if (!candleSignals.isOverbought) longScore += 1;
+
+        // Order book alignment (CRITICAL - give more weight to OB signals)
+        if (obSignals.strongBidImbalance) longScore += 4;
+        if (obSignals.supportDetected) longScore += 2;
+        if (obSignals.pricePressure === 'up' || obSignals.pricePressure === 'strong_up') longScore += 3;
+        if (obSignals.compositeSignal.includes('buy')) longScore += 3;
+        if (obSignals.bidWalls.length > obSignals.askWalls.length) longScore += 2;
+
+        // Penalties for misalignment
+        if (obSignals.inDowntrend) longScore -= 2;
+        if (candleSignals.isBearish) longScore -= 3;
+    }
+
+    // === SHORT SIGNAL SCORING ===  
+    if (hasShortPotential) {
+        // Base score for having potential
+        shortScore += 2;
+
+        // Candle signals (incremental)
+        if (candleSignals.emaBearishCross) shortScore += 3;
+        if (candleSignals.sellingPressure) shortScore += 3;
+        if (candleSignals.downtrendConfirmed) shortScore += 2;
+        if (candleSignals.volumeSpike) shortScore += 2;
+        if (isDowntrend) shortScore += 1;
+
+        // Bollinger Band signals
+        if (useBollingerBands) {
+            if (candleSignals.nearUpperBand) shortScore += 2;
+        }
+
+        // RSI confirmation
+        if (candleSignals.isOverbought) shortScore += 1;
+
+        // Order book alignment (CRITICAL - give more weight to OB signals)
+        if (obSignals.strongAskImbalance) shortScore += 4;
+        if (obSignals.resistanceDetected) shortScore += 2;
+        if (obSignals.pricePressure === 'down' || obSignals.pricePressure === 'strong_down') shortScore += 3;
+        if (obSignals.compositeSignal.includes('sell')) shortScore += 3;
+        if (obSignals.askWalls.length > obSignals.bidWalls.length) shortScore += 2;
+
+        // Penalties for misalignment
+        if (obSignals.inUptrend) shortScore -= 2;
+        if (candleSignals.isBullish) shortScore -= 3;
+    }
+
+    // === ALIGNMENT BONUS (when both agree) ===
+    if (isUptrend && obSignals.inUptrend) longScore += 3;
+    if (isDowntrend && obSignals.inDowntrend) shortScore += 3;
+
+    // Maximum scores
+    const maxScore = 15;
+
+    if (this.DEBUG) {
+        console.log(`   📊 SCORING BREAKDOWN:`);
+        console.log(`      Long: ${longScore}/${maxScore} | Short: ${shortScore}/${maxScore}`);
+        console.log(`      Volume: ${isHighVolume} (Current: ${lastVolume.toFixed(0)}, Ratio: ${volumeRatio.toFixed(2)})`);
+        console.log(`      Potential: Long=${hasLongPotential}, Short=${hasShortPotential}`);
+        console.log(`      Order Book: ${obSignals.compositeSignal}`);
+    }
+
+    return {
+        long: Math.min(longScore, maxScore),
+        short: Math.min(shortScore, maxScore)
+    };
+}
