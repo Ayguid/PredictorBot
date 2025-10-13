@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Predictive Bot Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        /* KEEP ALL YOUR EXISTING CSS - IT'S GOOD */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%); color: #ffffff; min-height: 100vh; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; margin-bottom: 30px; padding: 20px; background: rgba(255, 255, 255, 0.05); border-radius: 15px; backdrop-filter: blur(10px); }
+        .header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(45deg, #00b4db, #0083b0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .status-bar { display: flex; justify-content: space-around; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .status-item { background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 10px; text-align: center; min-width: 150px; transition: all 0.3s ease; }
+        .status-item.running { border-left: 4px solid #00d26a; background: rgba(0, 210, 106, 0.1); }
+        .status-item.stopped { border-left: 4px solid #ff4757; background: rgba(255, 71, 87, 0.1); }
+        .status-item.test { border-left: 4px solid #ffa502; background: rgba(255, 165, 2, 0.1); }
+        .status-item.updating { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+        .dashboard-layout { display: grid; grid-template-columns: 1fr 400px; gap: 20px; margin-bottom: 30px; }
+        @media (max-width: 1024px) { .dashboard-layout { grid-template-columns: 1fr; } }
+        .chart-section { background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 20px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .chart-title { font-size: 1.5rem; font-weight: bold; }
+        .chart-controls { display: flex; gap: 10px; align-items: center; }
+        .chart-controls select, .chart-controls button { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+        .chart-controls button:hover { background: rgba(255, 255, 255, 0.2); }
+        .chart-container { position: relative; height: 500px; width: 100%; }
+        .symbols-sidebar { background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 20px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); max-height: 600px; overflow-y: auto; }
+        .symbols-list { display: flex; flex-direction: column; gap: 10px; }
+        .symbol-item { background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 10px; cursor: pointer; transition: all 0.3s ease; border: 1px solid transparent; }
+        .symbol-item:hover { background: rgba(255, 255, 255, 0.1); transform: translateX(5px); }
+        .symbol-item.active { border-color: #00b4db; background: rgba(0, 180, 219, 0.1); }
+        .symbol-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .symbol-name { font-weight: bold; font-size: 1.1rem; }
+        .signal { padding: 4px 10px; border-radius: 15px; font-weight: bold; text-transform: uppercase; font-size: 0.7rem; }
+        .signal.long { background: #00d26a; color: #000; }
+        .signal.short { background: #ff4757; color: #fff; }
+        .signal.neutral { background: #576574; color: #fff; }
+        .symbol-price { font-size: 1.2rem; font-weight: bold; margin-bottom: 5px; }
+        .symbol-details { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 0.8rem; opacity: 0.8; }
+        .analysis-details { background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 20px; margin-top: 20px; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .detail-item { background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; }
+        .detail-label { font-size: 0.8rem; opacity: 0.7; margin-bottom: 5px; }
+        .detail-value { font-size: 1.1rem; font-weight: bold; }
+        .score-bars { display: flex; gap: 10px; margin-top: 10px; }
+        .score-bar { flex: 1; background: rgba(255, 255, 255, 0.1); border-radius: 4px; overflow: hidden; height: 8px; }
+        .score-fill { height: 100%; transition: width 0.5s ease; }
+        .score-fill.long { background: #00d26a; }
+        .score-fill.short { background: #ff4757; }
+        .technical-indicators { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 15px; }
+        .indicator { text-align: center; padding: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 6px; font-size: 0.8rem; }
+        .last-update { text-align: center; margin-top: 20px; opacity: 0.7; font-size: 0.9rem; }
+        .connection-status { position: fixed; top: 20px; right: 20px; padding: 8px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; z-index: 1000; }
+        .connection-status.connected { background: #00d26a; color: #000; }
+        .connection-status.disconnected { background: #ff4757; color: #fff; }
+        @media (max-width: 768px) { .dashboard-layout { grid-template-columns: 1fr; } .status-bar { flex-direction: column; } .chart-container { height: 300px; } .connection-status { position: relative; top: auto; right: auto; margin-bottom: 10px; } }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">Connecting...</div>
+
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Binance Predictive Bot Dashboard</h1>
+            <p>Real-time market analysis and trading signals with interactive charts</p>
+        </div>
+
+        <div class="status-bar" id="statusBar">
+            <div class="status-item">
+                <div class="status-label">Bot Status</div>
+                <div class="status-value">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Mode</div>
+                <div class="status-value">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Timeframe</div>
+                <div class="status-value">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Uptime</div>
+                <div class="status-value">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Symbols</div>
+                <div class="status-value">--</div>
+            </div>
+        </div>
+
+        <div class="dashboard-layout">
+            <div class="chart-section">
+                <div class="chart-header">
+                    <div class="chart-title" id="chartTitle">Select a symbol to view chart</div>
+                    <div class="chart-controls">
+                        <select id="timeframeSelect">
+                            <option value="50">Last 50 candles</option>
+                            <option value="100" selected>Last 100 candles</option>
+                            <option value="200">Last 200 candles</option>
+                        </select>
+                        <button id="refreshChart">🔄 Refresh</button>
+                        <button id="autoRefreshToggle">🔁 Auto: ON</button>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="priceChart"></canvas>
+                </div>
+                
+                <div class="analysis-details" id="analysisDetails">
+                    <div class="no-data">Select a symbol to view analysis details</div>
+                </div>
+            </div>
+
+            <div class="symbols-sidebar">
+                <h3 style="margin-bottom: 15px;">Monitored Symbols</h3>
+                <div class="symbols-list" id="symbolsList">
+                    <div class="no-data">Loading symbols...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="last-update" id="lastUpdate">
+            Last update: --
+        </div>
+    </div>
+
+    <script>
+        class Dashboard {
+            constructor() {
+                this.socket = null;
+                this.analysisData = {};
+                this.currentSymbol = null;
+                this.priceChart = null;
+                this.autoRefresh = true;
+                this.chartUpdateInterval = null;
+                
+                this.initializeDashboard();
+                this.connectSocket();
+                this.setupEventListeners();
+            }
+
+            connectSocket() {
+                this.socket = io({
+                    reconnection: true,
+                    reconnectionAttempts: 10,
+                    reconnectionDelay: 1000
+                });
+
+                this.setupSocketListeners();
+            }
+
+            setupSocketListeners() {
+                this.socket.on('connect', () => {
+                    console.log('✅ Connected to server');
+                    this.updateConnectionStatus(true);
+                });
+
+                this.socket.on('disconnect', () => {
+                    console.log('❌ Disconnected from server');
+                    this.updateConnectionStatus(false);
+                });
+
+                this.socket.on('initial-data', (data) => {
+                    this.analysisData = data.analysis;
+                    this.updateSymbolsList();
+                    this.selectFirstSymbol();
+                    this.updateStatusBar(data.botStatus);
+                });
+
+                this.socket.on('analysis-update', (analysis) => {
+                    this.analysisData[analysis.symbol] = analysis;
+                    this.updateSymbolsList();
+                    
+                    if (analysis.symbol === this.currentSymbol) {
+                        this.updateAnalysisDetails(analysis);
+                    }
+                    
+                    this.updateLastUpdateTime();
+                });
+
+                this.socket.on('bot-status', (status) => {
+                    this.updateStatusBar(status);
+                });
+
+                this.socket.on('candle-data', (data) => {
+                    if (data.symbol === this.currentSymbol) {
+                        this.updateChart(data.candles);
+                    }
+                });
+            }
+
+            setupEventListeners() {
+                document.getElementById('timeframeSelect').addEventListener('change', (e) => {
+                    this.loadChartData(parseInt(e.target.value));
+                });
+
+                document.getElementById('refreshChart').addEventListener('click', () => {
+                    this.loadChartData();
+                });
+
+                document.getElementById('autoRefreshToggle').addEventListener('click', () => {
+                    this.toggleAutoRefresh();
+                });
+            }
+
+            initializeDashboard() {
+                this.initializeChart();
+            }
+
+            initializeChart() {
+                const ctx = document.getElementById('priceChart').getContext('2d');
+                this.priceChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        datasets: [{
+                            label: 'Price',
+                            data: [],
+                            borderColor: '#00b4db',
+                            backgroundColor: 'rgba(0, 180, 219, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: (context) => `Price: $${context.parsed.y.toFixed(4)}`
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: { unit: 'minute', displayFormats: { minute: 'HH:mm' } },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                                ticks: { color: 'rgba(255, 255, 255, 0.7)' }
+                            },
+                            y: {
+                                position: 'right',
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                                ticks: {
+                                    color: 'rgba(255, 255, 255, 0.7)',
+                                    callback: (value) => '$' + value.toFixed(2)
+                                }
+                            }
+                        },
+                        interaction: { intersect: false, mode: 'index' }
+                    }
+                });
+            }
+
+            updateChart(candles) {
+                if (!this.priceChart || !candles?.length) {
+                    console.log('No candle data available');
+                    return;
+                }
+
+                this.priceChart.data.datasets[0].data = candles.map(candle => ({
+                    x: new Date(candle.timestamp),
+                    y: candle.close
+                }));
+                this.priceChart.update('none');
+            }
+
+            loadChartData(limit = 100) {
+                if (!this.currentSymbol) {
+                    console.log('No symbol selected');
+                    return;
+                }
+                this.socket.emit('request-candles', { symbol: this.currentSymbol, limit });
+            }
+
+            toggleAutoRefresh() {
+                this.autoRefresh = !this.autoRefresh;
+                const button = document.getElementById('autoRefreshToggle');
+                button.textContent = this.autoRefresh ? '🔁 Auto: ON' : '⏸️ Auto: OFF';
+                
+                if (this.autoRefresh && this.currentSymbol) {
+                    this.startChartAutoRefresh();
+                } else {
+                    this.stopChartAutoRefresh();
+                }
+            }
+
+            startChartAutoRefresh() {
+                this.stopChartAutoRefresh();
+                this.chartUpdateInterval = setInterval(() => {
+                    if (this.currentSymbol && this.autoRefresh) {
+                        this.loadChartData();
+                    }
+                }, 10000);
+            }
+
+            stopChartAutoRefresh() {
+                if (this.chartUpdateInterval) {
+                    clearInterval(this.chartUpdateInterval);
+                    this.chartUpdateInterval = null;
+                }
+            }
+
+            updateSymbolsList() {
+                const symbolsList = document.getElementById('symbolsList');
+                const symbols = Object.keys(this.analysisData);
+                
+                if (symbols.length === 0) {
+                    symbolsList.innerHTML = '<div class="no-data">No analysis data available yet...</div>';
+                    return;
+                }
+
+                symbolsList.innerHTML = symbols.map(symbol => {
+                    const analysis = this.analysisData[symbol];
+                    const isActive = symbol === this.currentSymbol;
+                    const signal = analysis.signals?.compositeSignal || 'neutral';
+                    const currentPrice = analysis.currentPrice?.toFixed(4) || '--';
+                    const score = analysis.signals?.signalScore || { long: 0, short: 0 };
+
+                    return `
+                        <div class="symbol-item ${isActive ? 'active' : ''}" 
+                             onclick="dashboard.selectSymbol('${symbol}')">
+                            <div class="symbol-item-header">
+                                <div class="symbol-name">${symbol}</div>
+                                <div class="signal ${signal}">${signal.toUpperCase()}</div>
+                            </div>
+                            <div class="symbol-price">$${currentPrice}</div>
+                            <div class="symbol-details">
+                                <div>Long: ${score.long}/10</div>
+                                <div>Short: ${score.short}/10</div>
+                            </div>
+                            <div class="score-bars">
+                                <div class="score-bar">
+                                    <div class="score-fill long" style="width: ${score.long * 10}%"></div>
+                                </div>
+                                <div class="score-bar">
+                                    <div class="score-fill short" style="width: ${score.short * 10}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            selectSymbol(symbol) {
+                this.currentSymbol = symbol;
+                this.updateSymbolsList();
+                this.loadChartData();
+                this.updateAnalysisDetails(this.analysisData[symbol]);
+                document.getElementById('chartTitle').textContent = `${symbol} Price Chart`;
+                
+                if (this.autoRefresh) {
+                    this.startChartAutoRefresh();
+                }
+            }
+
+            selectFirstSymbol() {
+                const symbols = Object.keys(this.analysisData);
+                if (symbols.length > 0) {
+                    this.selectSymbol(symbols[0]);
+                }
+            }
+
+            updateAnalysisDetails(analysis) {
+                const detailsContainer = document.getElementById('analysisDetails');
+                if (!analysis) {
+                    detailsContainer.innerHTML = '<div class="no-data">Select a symbol to view analysis details</div>';
+                    return;
+                }
+
+                const signals = analysis.signals || {};
+                const indicators = analysis.indicators || {};
+                const suggestedPrices = analysis.suggestedPrices || {};
+
+                detailsContainer.innerHTML = `
+                    <h3 style="margin-bottom: 15px;">Analysis Details - ${analysis.symbol}</h3>
+                    
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-label">Current Price</div>
+                            <div class="detail-value">$${analysis.currentPrice?.toFixed(4) || '--'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Signal</div>
+                            <div class="detail-value signal ${signals.compositeSignal}">
+                                ${(signals.compositeSignal || 'neutral').toUpperCase()}
+                            </div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Signal Score</div>
+                            <div class="detail-value">
+                                Long: ${signals.signalScore?.long || 0}/10<br>
+                                Short: ${signals.signalScore?.short || 0}/10
+                            </div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Last Analysis</div>
+                            <div class="detail-value">${new Date(analysis.timestamp).toLocaleTimeString()}</div>
+                        </div>
+                    </div>
+
+                    <div class="technical-indicators">
+                        <div class="indicator">
+                            <div>RSI</div>
+                            <div>${indicators.rsi?.toFixed(2) || '--'}</div>
+                        </div>
+                        <div class="indicator">
+                            <div>EMA Fast</div>
+                            <div>${indicators.emaFast?.toFixed(4) || '--'}</div>
+                        </div>
+                        <div class="indicator">
+                            <div>EMA Medium</div>
+                            <div>${indicators.emaMedium?.toFixed(4) || '--'}</div>
+                        </div>
+                        <div class="indicator">
+                            <div>EMA Slow</div>
+                            <div>${indicators.emaSlow?.toFixed(4) || '--'}</div>
+                        </div>
+                        <div class="indicator">
+                            <div>Volume Spike</div>
+                            <div>${indicators.volumeSpike ? '📈' : '📊'}</div>
+                        </div>
+                        <div class="indicator">
+                            <div>Buying Pressure</div>
+                            <div>${indicators.buyingPressure ? '✅' : '❌'}</div>
+                        </div>
+                    </div>
+
+                    ${suggestedPrices.entry ? `
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">Trading Suggestions</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Entry Price</div>
+                                <div class="detail-value">$${suggestedPrices.entry.toFixed(4)}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Stop Loss</div>
+                                <div class="detail-value">$${suggestedPrices.stopLoss.toFixed(4)}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Take Profit</div>
+                                <div class="detail-value">$${suggestedPrices.takeProfit.toFixed(4)}</div>
+                            </div>
+                            ${suggestedPrices.optimalEntry ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Optimal Entry</div>
+                                <div class="detail-value">$${suggestedPrices.optimalEntry.toFixed(4)}</div>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    ` : ''}
+                `;
+            }
+
+            updateStatusBar(status) {
+                const statusBar = document.getElementById('statusBar');
+                const statusClass = status.isRunning ? 'running' : 'stopped';
+                const testClass = status.testMode ? 'test' : '';
+                
+                statusBar.classList.add('updating');
+                setTimeout(() => statusBar.classList.remove('updating'), 500);
+                
+                statusBar.innerHTML = `
+                    <div class="status-item ${statusClass}">
+                        <div class="status-label">Bot Status</div>
+                        <div class="status-value">${status.isRunning ? '🟢 RUNNING' : '🔴 STOPPED'}</div>
+                    </div>
+                    <div class="status-item ${testClass}">
+                        <div class="status-label">Mode</div>
+                        <div class="status-value">${status.testMode ? '🧪 TEST MODE' : '🚀 LIVE'}</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">Timeframe</div>
+                        <div class="status-value">${status.timeframe || '--'}</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">Uptime</div>
+                        <div class="status-value">${this.formatUptime(status.uptime)}</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">Symbols</div>
+                        <div class="status-value">${status.tradingPairs?.length || 0}</div>
+                    </div>
+                `;
+            }
+
+            formatUptime(uptime) {
+                if (!uptime) return '--';
+                const hours = Math.floor(uptime / (1000 * 60 * 60));
+                const minutes = Math.floor((uptime % (1000 * 60 * 60)) / (1000 * 60));
+                return `${hours}h ${minutes}m`;
+            }
+
+            updateConnectionStatus(connected) {
+                const statusElement = document.getElementById('connectionStatus');
+                if (connected) {
+                    statusElement.textContent = '✅ Connected';
+                    statusElement.className = 'connection-status connected';
+                } else {
+                    statusElement.textContent = '❌ Disconnected';
+                    statusElement.className = 'connection-status disconnected';
+                }
+            }
+
+            updateLastUpdateTime() {
+                document.getElementById('lastUpdate').textContent = 
+                    `Last update: ${new Date().toLocaleTimeString()}`;
+            }
+
+            destroy() {
+                this.stopChartAutoRefresh();
+                if (this.socket) this.socket.disconnect();
+            }
+        }
+
+        // Initialize dashboard
+        let dashboard;
+        document.addEventListener('DOMContentLoaded', () => {
+            dashboard = new Dashboard();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            dashboard?.destroy();
+        });
+    </script>
+</body>
+</html>
