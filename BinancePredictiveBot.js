@@ -167,11 +167,11 @@ class BinancePredictiveBot {
 getTradingPairs() {
     return {
         'BTCUSDT': { cooldown: 10, minVolume: 10, volatilityMultiplier: 1.0, volumeMultiplier: 0.3 },  // ✅ ADDED - 30% of EMA for BTC
-        //'ETHUSDT': { cooldown: 10, minVolume: 25, volatilityMultiplier: 1.2, volumeMultiplier: 0.4 },  // ✅ ADDED - 40% of EMA for ETH
-        //'BNBUSDT': { cooldown: 10, minVolume: 150, volatilityMultiplier: 1.1, volumeMultiplier: 0.5 },  // ✅ ADDED - 50% of EMA for BNB
-        //'XRPUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.2 },  // ✅ ADDED - 20% of EMA for XRP
-        //'ADAUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.25}, // ✅ ADDED - 25% of EMA for ADA
-        //'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8, volumeMultiplier: 0.15 } // ✅ ADDED - 15% of EMA for DOGE
+        'ETHUSDT': { cooldown: 10, minVolume: 25, volatilityMultiplier: 1.2, volumeMultiplier: 0.4 },  // ✅ ADDED - 40% of EMA for ETH
+        'BNBUSDT': { cooldown: 10, minVolume: 150, volatilityMultiplier: 1.1, volumeMultiplier: 0.5 },  // ✅ ADDED - 50% of EMA for BNB
+        'XRPUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.2 },  // ✅ ADDED - 20% of EMA for XRP
+        'ADAUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.25}, // ✅ ADDED - 25% of EMA for ADA
+        'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8, volumeMultiplier: 0.15 } // ✅ ADDED - 15% of EMA for DOGE
     };
 }
 
@@ -262,10 +262,26 @@ getTradingPairs() {
         }));
     }
 
-    async waitForWebSocketData() {
-        console.log('⏳ Waiting for WebSocket data flow to start...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-    }
+async waitForWebSocketData() {
+    console.log('⏳ Waiting for WebSocket data flow to start...');
+    
+    // Wait a bit for initial messages
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Check if we actually received depth data
+    Object.keys(this.config.tradingPairs).forEach(symbol => {
+        const symbolData = this.marketData[symbol];
+        const hasDepthData = symbolData.orderBook && 
+                           symbolData.orderBook.bids && 
+                           symbolData.orderBook.bids.length > 0;
+        
+        if (hasDepthData) {
+            console.log(`   ✅ ${symbol}: Depth data flowing (${symbolData.orderBook.bids.length} bids)`);
+        } else {
+            console.log(`   ⚠️ ${symbol}: No depth data received yet`);
+        }
+    });
+}
 
     async synchronizeOrderBookSnapshots() {
         console.log('📊 Getting synchronized order book snapshots...');

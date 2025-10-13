@@ -191,7 +191,6 @@ class ExchangeManager {
             this.sockets[`${pair}_kline`] = klineWs;
         });
     }
-
 connectDepthSocket(pair) {
     return new Promise((resolve, reject) => {
         if (this.isShuttingDown) {
@@ -203,18 +202,8 @@ connectDepthSocket(pair) {
         const depthWsUrl = `${this.wsBaseUrl}/ws/${pair.toLowerCase()}@depth@100ms`;
         const depthWs = new WebSocket(depthWsUrl);
 
-        let connectionStartTime = Date.now();
         let messageCount = 0;
-        let lastMessageTime = Date.now();
-
-        // Monitor connection health
-        const healthCheck = setInterval(() => {
-            const timeSinceLastMessage = Date.now() - lastMessageTime;
-            if (timeSinceLastMessage > 10000) { // 10 seconds without messages
-                console.warn(`🩺 Depth WebSocket health check failed for ${pair}: No messages for ${timeSinceLastMessage}ms`);
-                depthWs.close(); // Force reconnect
-            }
-        }, 5000);
+        let healthCheck;
 
         depthWs.on('open', () => {
             if (this.isShuttingDown) {
@@ -222,7 +211,22 @@ connectDepthSocket(pair) {
                 return;
             }
             console.log(`✅ Connected to ${pair} depth websocket`);
-            connectionStartTime = Date.now();
+            
+            // 🎯 SMARTER HEALTH CHECK: Start after 15 seconds, check every 10 seconds
+            healthCheck = setInterval(() => {
+                if (messageCount === 0) {
+                    console.warn(`🩺 ${pair} depth: No messages received after 15s, reconnecting`);
+                    depthWs.close();
+                }
+            }, 10000);
+            
+            // Start the check after 15 seconds
+            setTimeout(() => {
+                if (healthCheck && messageCount === 0) {
+                    console.warn(`🩺 ${pair} depth: No messages in first 15s`);
+                }
+            }, 15000);
+            
             resolve();
         });
 
@@ -230,13 +234,14 @@ connectDepthSocket(pair) {
             if (this.isShuttingDown) return;
             
             messageCount++;
-            lastMessageTime = Date.now();
-            
-            // Log connection stats periodically
-            /*if (messageCount % 100 === 0) {
-                const uptime = Math.floor((Date.now() - connectionStartTime) / 1000);
-                console.log(`📊 ${pair} depth: ${messageCount} messages over ${uptime}s (${Math.round(messageCount/uptime)}/sec)`);
-            }*/
+            if (messageCount === 1) {
+                console.log(`📥 ${pair} depth: First message received`);
+                // Clear health check once we start receiving data
+                if (healthCheck) {
+                    clearInterval(healthCheck);
+                    healthCheck = null;
+                }
+            }
 
             try {
                 const parsedData = JSON.parse(data);
@@ -249,31 +254,24 @@ connectDepthSocket(pair) {
         });
 
         depthWs.on('close', async (code, reason) => {
-            clearInterval(healthCheck);
-            console.log(`🔌 Depth websocket for ${pair} disconnected: ${code} - ${reason}`);
+            if (healthCheck) clearInterval(healthCheck);
+            console.log(`🔌 ${pair} depth disconnected: ${code} - ${reason}`);
             delete this.sockets[`${pair}_depth`];
 
             if (!this.isShuttingDown) {
-                const reconnectDelay = 2000; // 2 seconds
-                console.log(`⏰ Reconnecting depth for ${pair} in ${reconnectDelay}ms...`);
-                
-                const timeoutId = setTimeout(() => {
+                console.log(`⏰ Reconnecting ${pair} depth in 2s...`);
+                setTimeout(() => {
                     if (!this.isShuttingDown) {
                         this.connectDepthSocket(pair);
                     }
-                }, reconnectDelay);
-                this.reconnectTimeouts.set(`${pair}_depth`, timeoutId);
+                }, 2000);
             }
         });
 
         depthWs.on('error', (error) => {
-            clearInterval(healthCheck);
-            console.error(`❌ Depth websocket error for ${pair}:`, error);
+            if (healthCheck) clearInterval(healthCheck);
+            console.error(`❌ ${pair} depth error:`, error);
             reject(error);
-        });
-
-        depthWs.on('ping', () => {
-            depthWs.pong(); // Respond to keepalive ping
         });
 
         this.sockets[`${pair}_depth`] = depthWs;
