@@ -78,7 +78,7 @@ class BootManager {
         console.log(`\n📈 Configuration for ${this.bot.timeframe} timeframe:`);
         console.log(`- Analysis interval: ${this.bot.config.analysisInterval}ms`);
         console.log(`- Max candles: ${this.bot.config.maxCandles}`);
-        console.log(`- Trading pairs: ${this.bot.config.tradingPairs.length}`);
+        console.log(`- Trading pairs: ${Object.keys(this.bot.config.tradingPairs).length}`);
         console.log(`- Bollinger Bands: ${this.bot.config.riskManagement.useBollingerBands ? 'ENABLED' : 'DISABLED'}`);
         if (this.bot.config.riskManagement.useBollingerBands) {
             console.log(`- BB Adjustment: ${(this.bot.config.riskManagement.bollingerBandAdjustment * 100).toFixed(3)}%`);

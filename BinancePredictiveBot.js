@@ -28,13 +28,13 @@ class BinancePredictiveBot {
     initComponents() {
         this.logFormatter = new LogFormatter();
         this.bootManager = new BootManager(this);
-        
+
         // Core analyzers
         this.analyzers = {
             candle: new CandleAnalyzer(this.config),
             orderBook: new OrderBookAnalyzer(this.config)
         };
-        
+
         this.commandHandler = new CommandHandler(this);
         this.priceCalculator = new PriceCalculator(this.config);
         this.signalLogger = new SignalLogger(this);
@@ -164,16 +164,17 @@ class BinancePredictiveBot {
         };
     }
 
-getTradingPairs() {
-    return {
-        'BTCUSDT': { cooldown: 10, minVolume: 10, volatilityMultiplier: 1.0, volumeMultiplier: 0.3 },  // ✅ ADDED - 30% of EMA for BTC
-        'ETHUSDT': { cooldown: 10, minVolume: 25, volatilityMultiplier: 1.2, volumeMultiplier: 0.4 },  // ✅ ADDED - 40% of EMA for ETH
-        'BNBUSDT': { cooldown: 10, minVolume: 150, volatilityMultiplier: 1.1, volumeMultiplier: 0.5 },  // ✅ ADDED - 50% of EMA for BNB
-        'XRPUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.2 },  // ✅ ADDED - 20% of EMA for XRP
-        'ADAUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.25}, // ✅ ADDED - 25% of EMA for ADA
-        'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8, volumeMultiplier: 0.15 } // ✅ ADDED - 15% of EMA for DOGE
-    };
-}
+    getTradingPairs() {
+        return {
+            'BTCUSDT': { cooldown: 10, minVolume: 10, volatilityMultiplier: 1.0, volumeMultiplier: 0.3 },  // ✅ ADDED - 30% of EMA for BTC
+            'ETHUSDT': { cooldown: 10, minVolume: 25, volatilityMultiplier: 1.2, volumeMultiplier: 0.4 },  // ✅ ADDED - 40% of EMA for ETH
+            'BNBUSDT': { cooldown: 10, minVolume: 150, volatilityMultiplier: 1.1, volumeMultiplier: 0.5 },  // ✅ ADDED - 50% of EMA for BNB
+            'XRPUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.2 },  // ✅ ADDED - 20% of EMA for XRP
+            'ADAUSDT': { cooldown: 10, minVolume: 50000, volatilityMultiplier: 1.5, volumeMultiplier: 0.25 }, // ✅ ADDED - 25% of EMA for ADA
+            'SOLUSDT': { cooldown: 10, minVolume: 2000, volatilityMultiplier: 1.6, volumeMultiplier: 0.35 }
+            //'DOGEUSDT': { cooldown: 10, minVolume: 2000000, volatilityMultiplier: 1.8, volumeMultiplier: 0.15 } // ✅ ADDED - 15% of EMA for DOGE
+        };
+    }
 
     calculateAdaptiveRiskManagement(baseRiskManagement, timeframeConfig) {
         const multiplier = timeframeConfig.lookbackMultiplier;
@@ -220,31 +221,34 @@ getTradingPairs() {
         await this.connectWebSocketStreams();
         await this.waitForWebSocketData();
 
-         // ✅ VERIFY connections are actually receiving data
-    console.log('🔍 Verifying WebSocket data flow...');
-    let depthWorking = false;
-    let klineWorking = false;
-    
-    Object.keys(this.config.tradingPairs).forEach(symbol => {
-        const depthSocket = this.exchangeManager.sockets[`${symbol}_depth`];
-        const klineSocket = this.exchangeManager.sockets[`${symbol}_kline`];
-        
-        if (depthSocket && depthSocket.readyState === 1) {
-            console.log(`   ✅ ${symbol} depth: CONNECTED`);
-            depthWorking = true;
-        } else {
-            console.log(`   ❌ ${symbol} depth: NOT CONNECTED`);
+        // ✅ VERIFY connections are actually receiving data
+        console.log('🔍 Verifying WebSocket data flow...');
+        let depthWorking = false;
+        let klineWorking = false;
+
+        Object.keys(this.config.tradingPairs).forEach(symbol => {
+            const depthSocket = this.exchangeManager.sockets[`${symbol}_depth`];
+            const klineSocket = this.exchangeManager.sockets[`${symbol}_kline`];
+
+            if (depthSocket && depthSocket.readyState === 1) {
+                console.log(`   ✅ ${symbol} depth: CONNECTED`);
+                depthWorking = true;
+            } else {
+                console.log(`   ❌ ${symbol} depth: NOT CONNECTED`);
+            }
+
+            if (klineSocket && klineSocket.readyState === 1) {
+                console.log(`   ✅ ${symbol} kline: CONNECTED`);
+                klineWorking = true;
+            }
+        });
+
+        if (!depthWorking) {
+            console.warn('⚠️ Depth WebSockets not functioning properly after restart');
         }
-        
-        if (klineSocket && klineSocket.readyState === 1) {
-            console.log(`   ✅ ${symbol} kline: CONNECTED`);
-            klineWorking = true;
+        if (!klineWorking) {
+            console.warn('⚠️ Kline WebSockets not functioning properly after restart');
         }
-    });
-    
-    if (!depthWorking) {
-        console.warn('⚠️ Depth WebSockets not functioning properly after restart');
-    }
         await this.synchronizeOrderBookSnapshots();
         await this.validateCandleStreaming();
     }
@@ -262,32 +266,32 @@ getTradingPairs() {
         }));
     }
 
-async waitForWebSocketData() {
-    console.log('⏳ Waiting for WebSocket data flow to start...');
-    
-    // Wait a bit for initial messages
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Check if we actually received depth data
-    Object.keys(this.config.tradingPairs).forEach(symbol => {
-        const symbolData = this.marketData[symbol];
-        const hasDepthData = symbolData.orderBook && 
-                           symbolData.orderBook.bids && 
-                           symbolData.orderBook.bids.length > 0;
-        
-        if (hasDepthData) {
-            console.log(`   ✅ ${symbol}: Depth data flowing (${symbolData.orderBook.bids.length} bids)`);
-        } else {
-            console.log(`   ⚠️ ${symbol}: No depth data received yet`);
-        }
-    });
-}
+    async waitForWebSocketData() {
+        console.log('⏳ Waiting for WebSocket data flow to start...');
+
+        // Wait a bit for initial messages
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Check if we actually received depth data
+        Object.keys(this.config.tradingPairs).forEach(symbol => {
+            const symbolData = this.marketData[symbol];
+            const hasDepthData = symbolData.orderBook &&
+                symbolData.orderBook.bids &&
+                symbolData.orderBook.bids.length > 0;
+
+            if (hasDepthData) {
+                console.log(`   ✅ ${symbol}: Depth data flowing (${symbolData.orderBook.bids.length} bids)`);
+            } else {
+                console.log(`   ⚠️ ${symbol}: No depth data received yet`);
+            }
+        });
+    }
 
     async synchronizeOrderBookSnapshots() {
         console.log('📊 Getting synchronized order book snapshots...');
         await Promise.all(Object.keys(this.config.tradingPairs).map(async symbol => {
             console.log(`📊 Initializing order book for ${symbol}...`);
-            
+
             let retries = 3;
             while (retries > 0) {
                 try {
@@ -313,7 +317,7 @@ async waitForWebSocketData() {
     async validateCandleStreaming() {
         console.log('🔍 Validating candle streaming...');
         await new Promise(resolve => setTimeout(resolve, 5000));
-        
+
         Object.keys(this.config.tradingPairs).forEach(symbol => {
             const candles = this.marketData[symbol].candles;
             if (candles.length > 0) {
@@ -353,10 +357,9 @@ async waitForWebSocketData() {
             kline.t, parseFloat(kline.o), parseFloat(kline.h),
             parseFloat(kline.l), parseFloat(kline.c), parseFloat(kline.v)
         ];
-        
+
         const symbolData = this.marketData[symbol];
-        const previousClose = symbolData.candles.length > 0 ? symbolData.candles[symbolData.candles.length - 1][4] : null;
-        
+
         if (kline.x) {
             symbolData.candles.push(candle);
             if (symbolData.candles.length > this.config.maxCandles) {
@@ -372,7 +375,7 @@ async waitForWebSocketData() {
 
     processDepthData(symbol, data) {
         const symbolData = this.marketData[symbol];
-        
+
         if (symbolData.bufferingUpdates) {
             const updatedOrderBook = this.applyDepthUpdate(data, symbolData.orderBook);
             if (updatedOrderBook) {
@@ -384,19 +387,19 @@ async waitForWebSocketData() {
         if (this.DEBUG) {
             // console.log('prcs depth; ', symbol, `U=${data.U} u=${data.u}`);
         }
-        
+
         symbolData.previousOrderBook = this.exchangeManager.deepCopyOrderBook(symbolData.orderBook);
-        
+
         const updatedOrderBook = this.exchangeManager.processIncrementalDepthUpdate(
             data,
             symbolData.orderBook
         );
-        
+
         if (updatedOrderBook === null) {
             if (!symbolData.needsReinitialization) {
                 symbolData.needsReinitialization = true;
                 console.warn(`⚠️ ${symbol}: Order book out of sync, will reinitialize`);
-                
+
                 clearTimeout(symbolData._reinitTimeout);
                 symbolData._reinitTimeout = setTimeout(() => {
                     this.reinitializeOrderBook(symbol);
@@ -449,7 +452,7 @@ async waitForWebSocketData() {
 
     async reinitializeOrderBook(symbol) {
         if (!this.marketData[symbol]?.needsReinitialization) return;
-        
+
         console.log(`🔄 Reinitializing order book for ${symbol}...`);
         try {
             const snapshot = await this.exchangeManager.getOrderBookSnapshot(symbol);
@@ -505,9 +508,9 @@ async waitForWebSocketData() {
 
         if (this.DEBUG) {
             console.log(`📊 ${symbol} Order Book Stats: ${orderBook.bids.length} bids, ${orderBook.asks.length} asks`);
-                    const lastCandle = candles[candles.length - 1];
-        const candleVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
-        console.log(`   🔍 VOLUME DEBUG: Candle=${candleVolume}, OB Bid=${obAnalysis.metrics.totalBidVolume.toFixed(1)}, OB Ask=${obAnalysis.metrics.totalAskVolume.toFixed(1)}`);
+            const lastCandle = candles[candles.length - 1];
+            const candleVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
+            console.log(`   🔍 VOLUME DEBUG: Candle=${candleVolume}, OB Bid=${obAnalysis.metrics.totalBidVolume.toFixed(1)}, OB Ask=${obAnalysis.metrics.totalAskVolume.toFixed(1)}`);
         }
 
         const signalScore = this.calculateSignalScore(candleAnalysis, obAnalysis.signals, candles, symbol);
@@ -653,134 +656,134 @@ async waitForWebSocketData() {
         return null;
     }
 
-calculateSignalScore(candleSignals, obSignals, candles, symbol) {
-    let longScore = 0;
-    let shortScore = 0;
+    calculateSignalScore(candleSignals, obSignals, candles, symbol) {
+        let longScore = 0;
+        let shortScore = 0;
 
-    const isUptrend = candleSignals.emaFast > candleSignals.emaMedium &&
-        candleSignals.emaMedium > candleSignals.emaSlow;
+        const isUptrend = candleSignals.emaFast > candleSignals.emaMedium &&
+            candleSignals.emaMedium > candleSignals.emaSlow;
 
-    const isDowntrend = candleSignals.emaFast < candleSignals.emaMedium &&
-        candleSignals.emaMedium < candleSignals.emaSlow;
+        const isDowntrend = candleSignals.emaFast < candleSignals.emaMedium &&
+            candleSignals.emaMedium < candleSignals.emaSlow;
 
-    const lastCandle = candles[candles.length - 1];
-    const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
+        const lastCandle = candles[candles.length - 1];
+        const lastVolume = this.analyzers.candle._getCandleProp(lastCandle, 'volume');
 
-    // ✅ MANDATORY VOLUME: Must have volume spike to proceed
-    const isHighVolume = candleSignals.volumeSpike ||
-        lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier; // try lowering this.config.riskManagement.volumeAverageMultiplier
+        // ✅ MANDATORY VOLUME: Must have volume spike to proceed
+        const isHighVolume = candleSignals.volumeSpike ||
+            lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier; // try lowering this.config.riskManagement.volumeAverageMultiplier
         //
         if (this.DEBUG) {
-        console.log(`🔍 VOLUME VALIDATION for ${symbol}:`);
-        console.log(`   Volume Spike: ${candleSignals.volumeSpike}`);
-        console.log(`   Last Volume: ${lastVolume}`);
-        console.log(`   Volume EMA: ${candleSignals.volumeEMA}`);
-        console.log(`   Multiplier: ${this.config.riskManagement.volumeAverageMultiplier}`);
-        console.log(`   Required: ${candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier}`);
-        console.log(`   High Volume Condition: ${lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier}`);
-        console.log(`   Final isHighVolume: ${isHighVolume}`);
-    }
-    // ✅ VOLUME CHECK - REJECT if no volume
-    if (!isHighVolume) {
+            console.log(`🔍 VOLUME VALIDATION for ${symbol}:`);
+            console.log(`   Volume Spike: ${candleSignals.volumeSpike}`);
+            console.log(`   Last Volume: ${lastVolume}`);
+            console.log(`   Volume EMA: ${candleSignals.volumeEMA}`);
+            console.log(`   Multiplier: ${this.config.riskManagement.volumeAverageMultiplier}`);
+            console.log(`   Required: ${candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier}`);
+            console.log(`   High Volume Condition: ${lastVolume > candleSignals.volumeEMA * this.config.riskManagement.volumeAverageMultiplier}`);
+            console.log(`   Final isHighVolume: ${isHighVolume}`);
+        }
+        // ✅ VOLUME CHECK - REJECT if no volume
+        if (!isHighVolume) {
+            if (this.DEBUG) {
+                console.log(`   🚫 NO VOLUME: Rejecting all signals for ${symbol}`);
+            }
+            return { long: 0, short: 0 };
+        }
+
+        const { useBollingerBands } = this.config.riskManagement;
+
+        // ✅ STRICTER: Require multiple strong signals to start scoring
+        /*
+        const hasStrongLongBase = candleSignals.emaBullishCross || candleSignals.buyingPressure;
+        const hasStrongShortBase = candleSignals.emaBearishCross || candleSignals.sellingPressure;
+        */
+        const hasStrongLongBase = candleSignals.emaBullishCross || candleSignals.buyingPressure ||
+            candleSignals.trendConfirmed || candleSignals.volumeSpike;
+        const hasStrongShortBase = candleSignals.emaBearishCross || candleSignals.sellingPressure ||
+            candleSignals.downtrendConfirmed || candleSignals.volumeSpike;
+        // === LONG SIGNAL SCORING ===
+        if (hasStrongLongBase) {
+            // Core trend signals (REDUCED WEIGHT)
+            if (candleSignals.emaBullishCross) longScore += 2;
+            if (candleSignals.buyingPressure) longScore += 2;
+            if (isUptrend) longScore += 1;
+
+            // Bollinger Band signals (REDUCED WEIGHT)
+            if (useBollingerBands) {
+                if (candleSignals.nearLowerBand) longScore += 1;
+                if (candleSignals.bbandsSqueeze) longScore += 0;
+            }
+
+            // RSI confirmation (STRICTER)
+            if (!candleSignals.isOverbought) longScore += 1;
+
+            // ✅ VOLUME BONUS (since it's mandatory, give it good weight)
+            longScore += 2;
+
+            // Order book signals (STRICTER - REQUIRE ALIGNMENT)
+            if (!obSignals.inDowntrend) {
+                if (obSignals.strongBidImbalance) longScore += 1;
+                if (obSignals.supportDetected) longScore += 1;
+                if (obSignals.pricePressure === 'up' || obSignals.pricePressure === 'strong_up') longScore += 1;
+
+                if (obSignals.compositeSignal.includes('buy')) longScore += 1;
+            } else {
+                longScore -= 3;
+            }
+        }
+
+        // === SHORT SIGNAL SCORING ===
+        if (hasStrongShortBase) {
+            // Core trend signals (REDUCED WEIGHT)
+            if (candleSignals.emaBearishCross) shortScore += 2;
+            if (candleSignals.sellingPressure) shortScore += 2;
+            if (isDowntrend) shortScore += 1;
+
+            // Bollinger Band signals (REDUCED WEIGHT)
+            if (useBollingerBands) {
+                if (candleSignals.nearUpperBand) shortScore += 1;
+                if (candleSignals.bbandsSqueeze) shortScore += 0;
+            }
+
+            // RSI confirmation (STRICTER)
+            if (candleSignals.isOverbought) shortScore += 1;
+
+            // ✅ VOLUME BONUS (since it's mandatory, give it good weight)
+            shortScore += 2;
+
+            // Order book signals (STRICTER - REQUIRE ALIGNMENT)
+            if (!obSignals.inUptrend) {
+                if (obSignals.strongAskImbalance) shortScore += 1;
+                if (obSignals.resistanceDetected) shortScore += 1;
+                if (obSignals.pricePressure === 'down' || obSignals.pricePressure === 'strong_down') shortScore += 1;
+
+                if (obSignals.compositeSignal.includes('sell')) shortScore += 1;
+            } else {
+                shortScore -= 3;
+            }
+        }
+
+        // === ALIGNMENT BONUS (STRICTER - BOTH MUST AGREE) ===
+        if (isUptrend && obSignals.inUptrend && hasStrongLongBase) longScore += 2;
+        if (isDowntrend && obSignals.inDowntrend && hasStrongShortBase) shortScore += 2;
+
+        // ✅ ADD: MAXIMUM SCORE CAP for weaker setups
+        const maxLongScore = hasStrongLongBase ? 10 : 5;
+        const maxShortScore = hasStrongShortBase ? 10 : 5;
+
         if (this.DEBUG) {
-            console.log(`   🚫 NO VOLUME: Rejecting all signals for ${symbol}`);
+            console.log(`   📊 SCORING BREAKDOWN (MANDATORY VOLUME):`);
+            console.log(`      Long: ${longScore}/${maxLongScore} | Short: ${shortScore}/${maxShortScore}`);
+            console.log(`      Volume: ${isHighVolume} (MANDATORY)`);
+            console.log(`      Strong Base: Long=${hasStrongLongBase}, Short=${hasStrongShortBase}`);
         }
-        return { long: 0, short: 0 };
+
+        return {
+            long: Math.min(longScore, maxLongScore),
+            short: Math.min(shortScore, maxShortScore)
+        };
     }
-
-    const { useBollingerBands } = this.config.riskManagement;
-
-    // ✅ STRICTER: Require multiple strong signals to start scoring
-    /*
-    const hasStrongLongBase = candleSignals.emaBullishCross || candleSignals.buyingPressure;
-    const hasStrongShortBase = candleSignals.emaBearishCross || candleSignals.sellingPressure;
-    */
-    const hasStrongLongBase = candleSignals.emaBullishCross || candleSignals.buyingPressure || 
-                         candleSignals.trendConfirmed || candleSignals.volumeSpike;
-    const hasStrongShortBase = candleSignals.emaBearishCross || candleSignals.sellingPressure || 
-                            candleSignals.downtrendConfirmed || candleSignals.volumeSpike;
-    // === LONG SIGNAL SCORING ===
-    if (hasStrongLongBase) {
-        // Core trend signals (REDUCED WEIGHT)
-        if (candleSignals.emaBullishCross) longScore += 2;
-        if (candleSignals.buyingPressure) longScore += 2;
-        if (isUptrend) longScore += 1;
-
-        // Bollinger Band signals (REDUCED WEIGHT)
-        if (useBollingerBands) {
-            if (candleSignals.nearLowerBand) longScore += 1;
-            if (candleSignals.bbandsSqueeze) longScore += 0;
-        }
-
-        // RSI confirmation (STRICTER)
-        if (!candleSignals.isOverbought) longScore += 1;
-
-        // ✅ VOLUME BONUS (since it's mandatory, give it good weight)
-        longScore += 2;
-
-        // Order book signals (STRICTER - REQUIRE ALIGNMENT)
-        if (!obSignals.inDowntrend) {
-            if (obSignals.strongBidImbalance) longScore += 1;
-            if (obSignals.supportDetected) longScore += 1;
-            if (obSignals.pricePressure === 'up' || obSignals.pricePressure === 'strong_up') longScore += 1;
-
-            if (obSignals.compositeSignal.includes('buy')) longScore += 1;
-        } else {
-            longScore -= 3;
-        }
-    }
-
-    // === SHORT SIGNAL SCORING ===
-    if (hasStrongShortBase) {
-        // Core trend signals (REDUCED WEIGHT)
-        if (candleSignals.emaBearishCross) shortScore += 2;
-        if (candleSignals.sellingPressure) shortScore += 2;
-        if (isDowntrend) shortScore += 1;
-
-        // Bollinger Band signals (REDUCED WEIGHT)
-        if (useBollingerBands) {
-            if (candleSignals.nearUpperBand) shortScore += 1;
-            if (candleSignals.bbandsSqueeze) shortScore += 0;
-        }
-
-        // RSI confirmation (STRICTER)
-        if (candleSignals.isOverbought) shortScore += 1;
-
-        // ✅ VOLUME BONUS (since it's mandatory, give it good weight)
-        shortScore += 2;
-
-        // Order book signals (STRICTER - REQUIRE ALIGNMENT)
-        if (!obSignals.inUptrend) {
-            if (obSignals.strongAskImbalance) shortScore += 1;
-            if (obSignals.resistanceDetected) shortScore += 1;
-            if (obSignals.pricePressure === 'down' || obSignals.pricePressure === 'strong_down') shortScore += 1;
-
-            if (obSignals.compositeSignal.includes('sell')) shortScore += 1;
-        } else {
-            shortScore -= 3;
-        }
-    }
-
-    // === ALIGNMENT BONUS (STRICTER - BOTH MUST AGREE) ===
-    if (isUptrend && obSignals.inUptrend && hasStrongLongBase) longScore += 2;
-    if (isDowntrend && obSignals.inDowntrend && hasStrongShortBase) shortScore += 2;
-
-    // ✅ ADD: MAXIMUM SCORE CAP for weaker setups
-    const maxLongScore = hasStrongLongBase ? 10 : 5;
-    const maxShortScore = hasStrongShortBase ? 10 : 5;
-
-    if (this.DEBUG) {
-        console.log(`   📊 SCORING BREAKDOWN (MANDATORY VOLUME):`);
-        console.log(`      Long: ${longScore}/${maxLongScore} | Short: ${shortScore}/${maxShortScore}`);
-        console.log(`      Volume: ${isHighVolume} (MANDATORY)`);
-        console.log(`      Strong Base: Long=${hasStrongLongBase}, Short=${hasStrongShortBase}`);
-    }
-
-    return {
-        long: Math.min(longScore, maxLongScore),
-        short: Math.min(shortScore, maxShortScore)
-    };
-}
 
 
 
